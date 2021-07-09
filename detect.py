@@ -1,3 +1,4 @@
+import sys
 import argparse
 import os
 import shutil
@@ -9,25 +10,34 @@ import torch
 import torch.backends.cudnn as cudnn
 from numpy import random
 
-from models.experimental import attempt_load
-from utils.datasets import LoadStreams, LoadImages
-from utils.general import (
-    check_img_size, non_max_suppression, apply_classifier, scale_coords,
-    xyxy2xywh, plot_one_box, strip_optimizer, set_logging, plot_bbox_on_img)
-from utils.torch_utils import select_device, load_classifier, time_synchronized
-
-from tracker.traditional.tracker import Tracker
-from tracker.traditional.unit_object import UnitObject
+from tracker.tracker import Tracker
+from tracker.unit_object import UnitObject
 from pairs.pairing import Pairing
-# from pairing.pair_unit import Pair_unit
 
 def detect(save_img=False):
-    out, source, weights, view_img, save_txt, imgsz = \
+    out, source, weights, view_img, save_txt, imgsz= \
         opt.save_dir, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
+    
+    if opt.device == 'cpu' or opt.no_yolov5:
+        sys.path.insert(0, './yolov5')
+        from yolov5.models.experimental import attempt_load
+        from yolov5.utils.datasets import LoadStreams, LoadImages
+        from yolov5.utils.general import (
+            check_img_size, non_max_suppression, apply_classifier, scale_coords,
+            xyxy2xywh, plot_one_box, plot_bbox_on_img)
+        from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
+    else:
+        sys.path.insert(0, './scaledyolov4')
+        from scaledyolov4.models.experimental import attempt_load
+        from scaledyolov4.utils.datasets import LoadStreams, LoadImages
+        from scaledyolov4.utils.general import (
+            check_img_size, non_max_suppression, apply_classifier, scale_coords,
+            xyxy2xywh, plot_one_box,  plot_bbox_on_img)
+        from scaledyolov4.utils.torch_utils import select_device, load_classifier, time_synchronized
+
     webcam = source.isnumeric() or source.startswith(('rtsp://', 'rtmp://', 'http://')) or source.endswith('.txt')
 
     # Initialize
-    set_logging()
     device = select_device(opt.device)
     if os.path.exists(out):  # output dir
         shutil.rmtree(out)  # delete dir
@@ -59,7 +69,6 @@ def detect(save_img=False):
 
     # Get names and colors of object
     names = model.module.names if hasattr(model, 'module') else model.names
-    # colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
     colors = [[0, 100, 0], [0, 204, 204]] # colors[0] - green, colors[1] - yellow (warning)
 
     # Initialize tracker
@@ -68,12 +77,11 @@ def detect(save_img=False):
     # Initialize pairing
     pair = Pairing(names,min_lost=5)
 
-
     # Run inference
     t0 = time.time()
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
     _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
-    curr_vidcap = None
+    curr_vidcap = None # for different video file
     for path, img, im0s, vid_cap in dataset:
         if (curr_vidcap!=vid_cap):
             curr_vidcap = vid_cap
@@ -98,7 +106,6 @@ def detect(save_img=False):
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
 
-        
         # initialize bboxes and coordinates
         bboxes = []
         coordinates = []
@@ -138,12 +145,9 @@ def detect(save_img=False):
                         # plot_bbox_on_img(c1, c2, im0, label=label, color=color[int(cls)], line_thickness=3)
                         bboxes.append([int(cls), conf, label, c1, c2])
 
-            # delete overlapping ? -> non-max supression
-            # bboxes = delete_overlappings(bboxes, 0.8)
             t3 = time_synchronized()
 
             for box in bboxes:
-                # print(box)
                 # pindah gantiin bboxes append
                 coordinates.append(UnitObject([box[3][0], box[3][1], box[4][0], box[4][1]], box[0]))
             
@@ -160,13 +164,9 @@ def detect(save_img=False):
                 class_id = tracker.tracker_list[j].unit_object.class_id
                 all_obj_list.append([x1, y1, x2, y2, track_id, class_id])
                 # cv2.putText(im0, str(tracker.tracker_list[j].tracking_id), (x,y), 0, 0.5, (0, 0, 255), 2)
-                print("tracker(%d) %d %d hits: %d" % (tracker.tracker_list[j].tracking_id, x1, y1, tracker.tracker_list[j].hits))
+                print("tracker(%d) hits: %d" % (tracker.tracker_list[j].tracking_id, tracker.tracker_list[j].hits))
                 # img_label = '%s %s - %.2f' % (names[int(tracker.tracker_list[j].unit_object.class_id)], str(tracker.tracker_list[j].tracking_id), conf)
-                # box = tracker.tracker_list[j].unit_object.xyxy
-                # c1, c2 = (int(box[0]), int(box[1])), (int(box[2]), int(box[3]))
-                # # c1, c2 = (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3]))
-                # plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[0], line_thickness=2)
-            
+                            
             t4 = time_synchronized()
 
             # Print time (inference + NMS)
@@ -181,25 +181,21 @@ def detect(save_img=False):
 
             t4 = time_synchronized()
             print('pairing time %.3fs' % (t4 - t3))
-            
-            # w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            # h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-            # obj_list, person_list = pair.output_xywh_to_xyxy(w, h)
+            # assign object and person to be plot in im0
             obj_list = pair.obj
             person_list = pair.person
-            # print('-',obj_list,'-')
             
             # check warning on pairing result and plot result
             for obj in obj_list:
                 c1, c2 = (int(obj[0]), int(obj[1])), (int(obj[2]), int(obj[3])) 
                 trk_id = str(obj[4])
-            #     # print('trk_id',trk_id)
+                # print('trk_id',trk_id)
                 cls_id = int(obj[5])
-            #     # print('cls_id',cls_id)
+                # print('cls_id',cls_id)
 
                 obj_status = [p for p in pair.pair_list if str(p.obj_track_id)==trk_id and int(p.obj_class_id)==cls_id]
-            #     # print(obj_status)
+                # print(obj_status)
                 if len(obj_status)==0:
                     print('something wrong, the object has not been assign to pair')
                 obj_status = obj_status[0]
@@ -252,10 +248,9 @@ def detect(save_img=False):
 
     print('Done. (%.3fs)' % (time.time() - t0))
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='weights/last.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='yolov5/weights/yolov5s_SGD_003.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='inference/videos/VIRAT_S_010204.mp4', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.5, help='object confidence threshold')
@@ -268,14 +263,15 @@ if __name__ == '__main__':
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
-    parser.add_argument('--update', action='store_true', help='update all models')
+    # parser.add_argument('--update', action='store_true', help='update all models')
+    parser.add_argument('--no-yolov5', action='store_true', help='using yolov5 or scaledyolov4 model for object detection, default yolov5')
     opt = parser.parse_args()
     print(opt)
 
     with torch.no_grad():
-        if opt.update:  # update all models (to fix SourceChangeWarning)
-            for opt.weights in ['yolov5s.pt', 'yolov5m.pt', 'yolov5l.pt', 'yolov5x.pt']:
-                detect()
-                strip_optimizer(opt.weights)
-        else:
-            detect()
+        # if opt.update:  # update all models (to fix SourceChangeWarning)
+        #     for opt.weights in ['yolov5s.pt', 'yolov5m.pt', 'yolov5l.pt', 'yolov5x.pt']:
+        #         detect()
+        #         strip_optimizer(opt.weights)
+        # else:
+        detect()
