@@ -65,7 +65,7 @@ class Tracker:
             z = unit_detections[idx].xyxy
             z = np.expand_dims(z, axis=0).T
             temp_track = KalmanTracker() #self.tracker()  # Create a new tracker
-            x = np.array([[z[0], 0, z[1], 0, z[2], 0, z[3], 0]]).T
+            x = np.array([[z[0], 0, z[1], 0, z[2], 0, z[3], 0]], dtype=object).T
             temp_track.x_state = x
             temp_track.predict_only()
             xx = temp_track.x_state

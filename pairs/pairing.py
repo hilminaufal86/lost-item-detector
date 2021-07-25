@@ -75,23 +75,6 @@ class Pairing:
                 else: #obj[2] == min_distance[1] person track_id is same and hit >5
                     pair.same_pair()
                     pair.hit += 1
-            
-            # check if any person assign as warning to non exist obj
-            # for per in self.person:
-            #     other = [p for p in self.pair_list if p[4]==per[4]]
-            #     if len(other)==0:
-            #         continue
-
-            #     is_obj_exist = False
-            #     for o in other:
-            #         if o[0] in self.obj[:][5] and o[1] in self.obj[:][4]:
-            #             is_obj_exist = True
-            #             break
-                
-            #     if not is_obj_exist:
-
-
-
     
     def reset(self, names, min_lost):
         self.names = names

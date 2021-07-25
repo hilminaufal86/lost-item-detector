@@ -4,15 +4,55 @@ import os
 import shutil
 import time
 from pathlib import Path
+import numpy as np
 
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
 from numpy import random
 
-from tracker.tracker import Tracker
-from tracker.unit_object import UnitObject
+from deep_sort_pytorch.utils.parser import get_config
+from deep_sort_pytorch.deep_sort import DeepSort
 from pairs.pairing import Pairing
+
+def xyxy_to_xywh(*xyxy):
+    """" Calculates the relative bounding box from absolute pixel values. """
+    bbox_left = min([xyxy[0].item(), xyxy[2].item()])
+    bbox_top = min([xyxy[1].item(), xyxy[3].item()])
+    bbox_w = abs(xyxy[0].item() - xyxy[2].item())
+    bbox_h = abs(xyxy[1].item() - xyxy[3].item())
+    x_c = (bbox_left + bbox_w / 2)
+    y_c = (bbox_top + bbox_h / 2)
+    w = bbox_w
+    h = bbox_h
+    return x_c, y_c, w, h
+
+def plot_bbox_on_img(c1, c2, img, color=None, label=None, line_thickness=None):
+    # Plots one bounding box on image img
+    tl = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
+    color = color or [random.randint(0, 255) for _ in range(3)]
+    # c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+    cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
+    if label:
+        tf = max(tl - 1, 1)  # font thickness
+        t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+        c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
+        cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
+        cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
+
+def create_screenshot(im1, im2, save_path, obj_name, obj_id, per_id):
+    h1, w1 = im1.shape[:2]
+    h2, w2 = im2.shape[:2]
+
+    # create empty matrix
+    img = np.zeros((max(h1, h2), w1 + w2, 3), np.uint8)
+
+    img[:h1, :w1, :3] = im1
+    img[:h2, w1:w1+w2, :3] = im2
+
+    label = obj_name + '-' + str(obj_id) + '-person-' + str(per_id) + '.jpg'
+    path = str(Path(save_path) / Path(label))
+    cv2.imwrite(path, img)
 
 def detect(save_img=False):
     out, source, weights, view_img, save_txt, imgsz= \
@@ -24,7 +64,7 @@ def detect(save_img=False):
         from yolov5.utils.datasets import LoadStreams, LoadImages
         from yolov5.utils.general import (
             check_img_size, non_max_suppression, apply_classifier, scale_coords,
-            xyxy2xywh, plot_one_box, plot_bbox_on_img)
+            xyxy2xywh, plot_one_box)
         from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
     else:
         sys.path.insert(0, './scaledyolov4')
@@ -32,7 +72,7 @@ def detect(save_img=False):
         from scaledyolov4.utils.datasets import LoadStreams, LoadImages
         from scaledyolov4.utils.general import (
             check_img_size, non_max_suppression, apply_classifier, scale_coords,
-            xyxy2xywh, plot_one_box,  plot_bbox_on_img)
+            xyxy2xywh, plot_one_box)
         from scaledyolov4.utils.torch_utils import select_device, load_classifier, time_synchronized
 
     webcam = source.isnumeric() or source.startswith(('rtsp://', 'rtmp://', 'http://')) or source.endswith('.txt')
@@ -71,8 +111,14 @@ def detect(save_img=False):
     names = model.module.names if hasattr(model, 'module') else model.names
     colors = [[0, 100, 0], [0, 204, 204]] # colors[0] - green, colors[1] - yellow (warning)
 
-    # Initialize tracker
-    tracker = Tracker()
+    # Initialize deepsort
+    cfg = get_config()
+    cfg.merge_from_file(opt.config_deepsort)
+    deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
+                        max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
+                        nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
+                        max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
+                        use_cuda=True)
 
     # Initialize pairing
     pair = Pairing(names,min_lost=5)
@@ -85,9 +131,21 @@ def detect(save_img=False):
     for path, img, im0s, vid_cap in dataset:
         if (curr_vidcap!=vid_cap):
             curr_vidcap = vid_cap
-            tracker.reset()
-            pair.reset(names, min_lost=5)            
-        
+            pair.reset(names, min_lost=5)    
+            deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
+                        max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
+                        nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
+                        max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
+                        use_cuda=True)      
+
+        if webcam:
+            ss_path = str(Path(out) / Path("webcam/screenshot"))
+                
+        else:
+            ss_path = str(Path(out) / Path(path).stem / Path("screenshot"))  
+        if not os.path.exists(ss_path):
+            os.makedirs(ss_path)
+
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -109,18 +167,22 @@ def detect(save_img=False):
         # initialize bboxes and coordinates
         bboxes = []
         coordinates = []
-
+        
         # Process detections
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
                 p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
             else:
                 p, s, im0 = path, '', im0s
-
+            img_ori = im0.copy()
             save_path = str(Path(out) / Path(p).name)
             txt_path = str(Path(out) / Path(p).stem) + ('_%g' % dataset.frame if dataset.mode == 'video' else '')
+
             s += '%gx%g ' % img.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            # gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            
+            outputs = []
+
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -130,48 +192,42 @@ def detect(save_img=False):
                     n = (det[:, -1] == c).sum()  # detections per class
                     s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
+                xywh_bboxes = []
+                confs = []
+                classes_id = []
+
+                t3 = time_synchronized()
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
-                    if save_txt:  # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, conf, *xywh) if opt.save_conf else (cls, *xywh)  # label format
-                        with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * len(line) + '\n') % line)
+                    x_c, y_c, bbox_w, bbox_h = xyxy_to_xywh(*xyxy)
+                    xywh = [x_c, y_c, bbox_w, bbox_h]
+                    xywh_bboxes.append(xywh)
+                    confs.append([conf.item()])
+                    classes_id.append([int(cls)])
+                
+                # print(xywh_bboxes)
+                xywhs = torch.Tensor(xywh_bboxes)
+                confss = torch.Tensor(confs)
+                clss_id = torch.Tensor(classes_id)
 
-                    if save_img or view_img:  # Add bbox to image
-                        label = '%s %.2f' % (names[int(cls)], conf)
-                        c1, c2 = (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3]))
-                        # plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
-                        # plot_bbox_on_img(c1, c2, im0, label=label, color=color[int(cls)], line_thickness=3)
-                        bboxes.append([int(cls), conf, label, c1, c2])
+                outputs = deepsort.update(xywhs, confss, im0, clss_id)
 
-            t3 = time_synchronized()
-
-            for box in bboxes:
-                # pindah gantiin bboxes append
-                coordinates.append(UnitObject([box[3][0], box[3][1], box[4][0], box[4][1]], box[0]))
-            
-            tracker.update(coordinates)
-
+                t4 = time_synchronized()
+                print('tracking time %.3fs' % (t4 - t3))
             # all_obj_list = list of (x1, y1, x2, y2, track_id, class_id)
             all_obj_list = []
-            for j in range(len(tracker.tracker_list)):
-                x1 = int(tracker.tracker_list[j].unit_object.xyxy[0])
-                y1 = int(tracker.tracker_list[j].unit_object.xyxy[1])
-                x2 = int(tracker.tracker_list[j].unit_object.xyxy[2])
-                y2 = int(tracker.tracker_list[j].unit_object.xyxy[3])
-                track_id = tracker.tracker_list[j].tracking_id
-                class_id = tracker.tracker_list[j].unit_object.class_id
-                all_obj_list.append([x1, y1, x2, y2, track_id, class_id])
-                # cv2.putText(im0, str(tracker.tracker_list[j].tracking_id), (x,y), 0, 0.5, (0, 0, 255), 2)
-                print("tracker(%d) hits: %d" % (tracker.tracker_list[j].tracking_id, tracker.tracker_list[j].hits))
-                # img_label = '%s %s - %.2f' % (names[int(tracker.tracker_list[j].unit_object.class_id)], str(tracker.tracker_list[j].tracking_id), conf)
-                            
-            t4 = time_synchronized()
 
-            # Print time (inference + NMS)
             print('%sDone. (%.3fs)' % (s, t2 - t1))
-            print('tracking time %.3fs' % (t4 - t3))
+            
+            if len(outputs)>0:
+                for output in outputs:
+                    x1 = int(output[0])
+                    y1 = int(output[1])
+                    x2 = int(output[2])
+                    y2 = int(output[3])
+                    track_id = output[4]
+                    class_id = output[5]
+                    all_obj_list.append([x1, y1, x2, y2, track_id, class_id])
 
             t3 = time_synchronized()
 
@@ -211,6 +267,18 @@ def detect(save_img=False):
                 cls_id = int(per[5])
                 obj_status = [p for p in pair.pair_list if str(p.other_track_id)==trk_id]
                 if len(obj_status)!= 0:
+                    im_person = img_ori[c1[1]:c2[1], c1[0]:c2[0]]
+                    for p in obj_status:
+                        obj = [o for o in obj_list if p.obj_class_id==o[5] and p.obj_track_id==o[4]]
+                        if len(obj)==0:
+                            continue
+                        obj = obj[0]
+                        obj_name = names[int(obj[5])]
+                        obj_trk_id = obj[4]
+                        x1, y1, x2, y2 = obj[:4]
+                        im_obj = img_ori[y1:y2, x1:x2]
+                        create_screenshot(im_obj, im_person, ss_path, obj_name, obj_trk_id, trk_id)
+
                     obj_status = obj_status[0]
                     warning = obj_status.warning
                 else:
@@ -251,6 +319,7 @@ def detect(save_img=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default='yolov5/weights/yolov5s_SGD_003.pt', help='model.pt path(s)')
+    parser.add_argument('--deep_sort_weights', type=str, default='deep_sort_pytorch/deep_sort/deep/checkpoint/ckpt.t7', help='ckpt.t7 path')
     parser.add_argument('--source', type=str, default='inference/videos/VIRAT_S_010204.mp4', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.5, help='object confidence threshold')
@@ -265,6 +334,7 @@ if __name__ == '__main__':
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     # parser.add_argument('--update', action='store_true', help='update all models')
     parser.add_argument('--no-yolov5', action='store_true', help='using yolov5 or scaledyolov4 model for object detection, default yolov5')
+    parser.add_argument("--config_deepsort", type=str, default="deep_sort_pytorch/configs/deep_sort.yaml")
     opt = parser.parse_args()
     print(opt)
 
