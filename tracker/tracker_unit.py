@@ -11,13 +11,13 @@ class TrackerUnit(ABC):
         self.x_state = []
 
     @abstractmethod
-    def predict_and_update(self, z):
+    def update(self, z):
         """
         Implement the predict and the update stages with the measurement z
         """
 
     @abstractmethod
-    def predict_only(self):
+    def predict(self):
         """
         Implement only the predict stage
         """

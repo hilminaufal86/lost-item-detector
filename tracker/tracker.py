@@ -36,7 +36,7 @@ class Tracker:
         self.tracker_list: List[TrackerUnit] = []
         # self.track_id_list = deque(list(map(str, range(25))))
         self.track_id = 1
-        self.tracker = KalmanTracker()
+        # self.tracker = KalmanTracker()
 
     def update(self, unit_detections):
         unit_trackers = []
@@ -49,13 +49,16 @@ class Tracker:
         # Matched Detections
         for track_idx, det_idx in matched:
             z = unit_detections[det_idx].xyxy
-            z = np.expand_dims(z, axis=0).T
+            # z = np.expand_dims(z, axis=0).T
+            
             temp_track = self.tracker_list[track_idx]
-            temp_track.predict_and_update(z)
-            xx = temp_track.x_state.T[0].tolist()
-            xx = [xx[0], xx[2], xx[4], xx[6]]
-            unit_trackers[track_idx].xyxy = xx
+            temp_track.predict()
+            temp_track.update(z)
+            xyxy = temp_track.get_x_bbox()
+            
+            unit_trackers[track_idx].xyxy = xyxy[:4]
             unit_trackers[track_idx].class_id = unit_detections[det_idx].class_id
+            
             temp_track.unit_object = unit_trackers[track_idx]
             temp_track.hits += 1
             temp_track.num_losses = 0
@@ -63,15 +66,16 @@ class Tracker:
         # Unmatched Detections -> detected object, unmatched track -> set as new track
         for idx in unmatched_dets:
             z = unit_detections[idx].xyxy
-            z = np.expand_dims(z, axis=0).T
-            temp_track = KalmanTracker() #self.tracker()  # Create a new tracker
-            x = np.array([[z[0], 0, z[1], 0, z[2], 0, z[3], 0]], dtype=object).T
-            temp_track.x_state = x
-            temp_track.predict_only()
-            xx = temp_track.x_state
-            xx = xx.T[0].tolist()
-            xx = [xx[0], xx[2], xx[4], xx[6]]
-            temp_track.unit_object.xyxy = xx
+            # z = np.expand_dims(z, axis=0).T
+            # x = np.array([[z[0], 0, z[1], 0, z[2], 0, z[3], 0]], dtype=object).T
+            temp_track = KalmanTracker(z) #self.tracker()  # Create a new tracker
+            # temp_track.x_state = x
+            temp_track.predict()
+            # xx = temp_track.x_state
+            xyxy = temp_track.get_x_bbox()
+            # xx = /
+            # xyxy = [xx[0], xx[1], xx[2], xx[3]]
+            temp_track.unit_object.xyxy = xyxy
             temp_track.unit_object.class_id = unit_detections[idx].class_id
             # temp_track.tracking_id = self.track_id_list.popleft()  # assign an ID for the tracker
             temp_track.tracking_id = self.track_id
@@ -83,11 +87,11 @@ class Tracker:
         for track_idx in unmatched_trks:
             temp_track = self.tracker_list[track_idx]
             temp_track.num_losses += 1
-            temp_track.predict_only()
-            xx = temp_track.x_state
-            xx = xx.T[0].tolist()
-            xx = [xx[0], xx[2], xx[4], xx[6]]
-            temp_track.unit_object.box = xx
+            temp_track.predict()
+            xyxy = temp_track.get_x_bbox()
+            # xx = xx.T[0].tolist()
+            # xyxy = [xx[0], xx[1], xx[2], xx[3]]
+            temp_track.unit_object.box = xyxy
             unit_trackers[track_idx] = temp_track.unit_object
 
         self.tracker_list = [x for x in self.tracker_list if x.num_losses <= self.max_age]
@@ -97,7 +101,7 @@ class Tracker:
         self.min_hits = minHits
         self.tracker_list: List[TrackerUnit] = []
         self.track_id = 1
-        self.tracker = KalmanTracker()
+        # self.tracker = KalmanTracker()
     
 
     @staticmethod
