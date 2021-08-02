@@ -239,7 +239,7 @@ def detect(save_img=False):
                     class_id = output[5]
                     all_obj_list.append([x1, y1, x2, y2, track_id, class_id])
 
-            t3 = time_synchronized()
+            t5 = time_synchronized()
 
             # # pairing
             pair.update(all_obj_list)
@@ -295,7 +295,7 @@ def detect(save_img=False):
                     img_label += ' - warning'
                 plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=2)
 
-            t4 = time_synchronized()
+            t6 = time_synchronized()
             pairing_total_time += (t6 - t5)
 
             # Stream results
