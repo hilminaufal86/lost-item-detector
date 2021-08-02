@@ -104,6 +104,12 @@ def detect(save_img=False):
 
     # Initialize pairing
     pair = Pairing(names,min_lost=5)
+    
+    # time
+    detection_total_time = 0.
+    tracking_total_time = 0.
+    pairing_total_time = 0.
+    total_frame = 0
 
     # Run inference
     t0 = time.time()
@@ -114,7 +120,8 @@ def detect(save_img=False):
         if (curr_vidcap!=vid_cap):
             curr_vidcap = vid_cap
             tracker.reset()
-            pair.reset(names, min_lost=5)          
+            pair.reset(names, min_lost=5) 
+        total_frame += 1         
 
         if webcam:
             ss_path = str(Path(out) / Path("webcam/screenshot"))
@@ -137,6 +144,8 @@ def detect(save_img=False):
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
+
+        detection_total_time += (t2 - t1)
 
         # Apply Classifier (second-stage)
         if classify:
@@ -201,24 +210,23 @@ def detect(save_img=False):
                 class_id = tracker.tracker_list[j].unit_object.class_id
                 all_obj_list.append([x1, y1, x2, y2, track_id, class_id])
                 # cv2.putText(im0, str(tracker.tracker_list[j].tracking_id), (x,y), 0, 0.5, (0, 0, 255), 2)
-                print("tracker(%d) hits: %d" % (tracker.tracker_list[j].tracking_id, tracker.tracker_list[j].hits))
+                # print("tracker(%d) hits: %d" % (tracker.tracker_list[j].tracking_id, tracker.tracker_list[j].hits))
                 # img_label = '%s %s - %.2f' % (names[int(tracker.tracker_list[j].unit_object.class_id)], str(tracker.tracker_list[j].tracking_id), conf)
                             
             t4 = time_synchronized()
 
+            tracking_total_time += (t4 - t3)
+
             # Print time (inference + NMS)
             print('%sDone. (%.3fs)' % (s, t2 - t1))
-            print('tracking time %.3fs' % (t4 - t3))
+            # print('tracking time %.3fs' % (t4 - t3))
 
-            t3 = time_synchronized()
+            t5 = time_synchronized()
 
             # # pairing
             pair.update(all_obj_list)
             pair.pair()
-
-            t4 = time_synchronized()
-            print('pairing time %.3fs' % (t4 - t3))
-
+            
             # assign object and person to be plot in im0
             obj_list = pair.obj
             person_list = pair.person
@@ -268,6 +276,10 @@ def detect(save_img=False):
                 if warning:
                     img_label += ' - warning'
                 plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=2)
+            
+            t6 = time_synchronized()
+            pairing_total_time += (t6 - t5)
+            # print('pairing time %.3fs' % (t6 - t5))
 
             # Stream results
             if view_img:
@@ -295,11 +307,17 @@ def detect(save_img=False):
     if save_txt or save_img:
         print('Results saved to %s' % Path(out))
 
+    print('Detection Total Time (%.3fs)' % (detection_total_time))
+    print('Detection Average Time (%.3fs)' % (detection_total_time/total_frame))
+    print('Tracking Total Time (%.3fs)' % (tracking_total_time))
+    print('Tracking Average Time (%.3fs)' % (tracking_total_time/total_frame))
+    print('Pairing Total Time (%.3fs)' % (pairing_total_time))
+    print('Pairing Average Time (%.3fs)' % (pairing_total_time/total_frame))
     print('Done. (%.3fs)' % (time.time() - t0))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='yolov5/weights/yolov5s_SGD_003.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='yolov5/weights/yolov5m_SGD.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='inference/videos/VIRAT_S_010204.mp4', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.5, help='object confidence threshold')
@@ -313,7 +331,7 @@ if __name__ == '__main__':
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     # parser.add_argument('--update', action='store_true', help='update all models')
-    parser.add_argument('--no-yolov5', action='store_true', help='using yolov5 or scaledyolov4 model for object detection, default yolov5')
+    parser.add_argument('--scaledyolov4', action='store_true', help='using yolov5 or scaledyolov4 model for object detection, default yolov5')
     opt = parser.parse_args()
     print(opt)
 

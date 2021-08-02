@@ -123,6 +123,12 @@ def detect(save_img=False):
     # Initialize pairing
     pair = Pairing(names,min_lost=5)
 
+    # time
+    detection_total_time = 0.
+    tracking_total_time = 0.
+    pairing_total_time = 0.
+    total_frame = 0
+
     # Run inference
     t0 = time.time()
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
@@ -137,6 +143,8 @@ def detect(save_img=False):
                         nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
                         max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
                         use_cuda=True)      
+
+        total_frame += 1   
 
         if webcam:
             ss_path = str(Path(out) / Path("webcam/screenshot"))
@@ -160,6 +168,7 @@ def detect(save_img=False):
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
 
+        detection_total_time += (t2 - t1)
         # Apply Classifier (second-stage)
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
@@ -183,6 +192,11 @@ def detect(save_img=False):
             
             outputs = []
 
+            t3 = time_synchronized()
+            
+            xywh_bboxes = []
+            confs = []
+            classes_id = []
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -192,11 +206,6 @@ def detect(save_img=False):
                     n = (det[:, -1] == c).sum()  # detections per class
                     s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
-                xywh_bboxes = []
-                confs = []
-                classes_id = []
-
-                t3 = time_synchronized()
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
                     x_c, y_c, bbox_w, bbox_h = xyxy_to_xywh(*xyxy)
@@ -206,15 +215,16 @@ def detect(save_img=False):
                     classes_id.append([int(cls)])
                 
                 # print(xywh_bboxes)
-                xywhs = torch.Tensor(xywh_bboxes)
-                confss = torch.Tensor(confs)
-                clss_id = torch.Tensor(classes_id)
+            xywhs = torch.Tensor(xywh_bboxes)
+            confss = torch.Tensor(confs)
+            clss_id = torch.Tensor(classes_id)
 
-                outputs = deepsort.update(xywhs, confss, im0, clss_id)
+            outputs = deepsort.update(xywhs, confss, im0, clss_id)
 
-                t4 = time_synchronized()
-                print('tracking time %.3fs' % (t4 - t3))
             # all_obj_list = list of (x1, y1, x2, y2, track_id, class_id)
+            t4 = time_synchronized()
+            tracking_total_time += (t4 - t3)
+            # print('tracking time %.3fs' % (t4 - t3))
             all_obj_list = []
 
             print('%sDone. (%.3fs)' % (s, t2 - t1))
@@ -234,10 +244,7 @@ def detect(save_img=False):
             # # pairing
             pair.update(all_obj_list)
             pair.pair()
-
-            t4 = time_synchronized()
-            print('pairing time %.3fs' % (t4 - t3))
-
+            
             # assign object and person to be plot in im0
             obj_list = pair.obj
             person_list = pair.person
@@ -288,6 +295,9 @@ def detect(save_img=False):
                     img_label += ' - warning'
                 plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=2)
 
+            t4 = time_synchronized()
+            pairing_total_time += (t6 - t5)
+
             # Stream results
             if view_img:
                 cv2.imshow(p, im0)
@@ -314,11 +324,17 @@ def detect(save_img=False):
     if save_txt or save_img:
         print('Results saved to %s' % Path(out))
 
+    print('Detection Total Time (%.3fs)' % (detection_total_time))
+    print('Detection Average Time (%.3fs)' % (detection_total_time/total_frame))
+    print('Tracking Total Time (%.3fs)' % (tracking_total_time))
+    print('Tracking Average Time (%.3fs)' % (tracking_total_time/total_frame))
+    print('Pairing Total Time (%.3fs)' % (pairing_total_time))
+    print('Pairing Average Time (%.3fs)' % (pairing_total_time/total_frame))
     print('Done. (%.3fs)' % (time.time() - t0))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='yolov5/weights/yolov5s_SGD_003.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='yolov5/weights/yolov5m_SGD.pt', help='model.pt path(s)')
     parser.add_argument('--deep_sort_weights', type=str, default='deep_sort_pytorch/deep_sort/deep/checkpoint/ckpt.t7', help='ckpt.t7 path')
     parser.add_argument('--source', type=str, default='inference/videos/VIRAT_S_010204.mp4', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
@@ -333,7 +349,7 @@ if __name__ == '__main__':
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     # parser.add_argument('--update', action='store_true', help='update all models')
-    parser.add_argument('--no-yolov5', action='store_true', help='using yolov5 or scaledyolov4 model for object detection, default yolov5')
+    parser.add_argument('--scaledyolov4', action='store_true', help='using yolov5 or scaledyolov4 model for object detection, default yolov5')
     parser.add_argument("--config_deepsort", type=str, default="deep_sort_pytorch/configs/deep_sort.yaml")
     opt = parser.parse_args()
     print(opt)
