@@ -58,7 +58,7 @@ def detect(save_img=False):
     out, source, weights, view_img, save_txt, imgsz= \
         opt.save_dir, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
     
-    if opt.device == 'cpu' or opt.no_yolov5:
+    if opt.device == 'cpu' or not opt.scaledyolov4:
         sys.path.insert(0, './yolov5')
         from yolov5.models.experimental import attempt_load
         from yolov5.utils.datasets import LoadStreams, LoadImages
