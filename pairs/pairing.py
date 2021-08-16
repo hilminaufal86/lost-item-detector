@@ -52,7 +52,14 @@ class Pairing:
     
     def pair(self):
         if len(self.person)==0: # no person found
-            return 0            
+            for obj in self.obj:
+                pair = [p for p in self.pair_list if p.is_obj_pair(obj[5], obj[4])][0]
+
+                pair.lost += 1
+                # if pair.person_track_id == -1:
+                if pair.lost > pair.lost_limit:
+                    pair.warning = 1
+
         else:
             # check pair person for each obj
             for obj in self.obj:
@@ -64,6 +71,7 @@ class Pairing:
                 if pair.person_track_id == -1: # object haven't been assign to person
                     pair.person_track_id = min_distance[1]
                     pair.hit += 1
+                    pair.lost = 0
 
                 elif pair.person_track_id != min_distance[1] and pair.hit < pair.min_hit: # person track_id diff
                     pair.person_track_id = min_distance[1]

@@ -1,12 +1,15 @@
-# Activation functions
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 # SiLU https://arxiv.org/pdf/1606.08415.pdf ----------------------------------------------------------------------------
 class SiLU(nn.Module):  # export-friendly version of nn.SiLU()
+    @staticmethod
+    def forward(x):
+        return x * torch.sigmoid(x)
+        
+# Swish https://arxiv.org/pdf/1905.02244.pdf ---------------------------------------------------------------------------
+class Swish(nn.Module):  #
     @staticmethod
     def forward(x):
         return x * torch.sigmoid(x)
@@ -65,7 +68,7 @@ class MemoryEfficientMish(nn.Module):
 class FReLU(nn.Module):
     def __init__(self, c1, k=3):  # ch_in, kernel
         super().__init__()
-        self.conv = nn.Conv2d(c1, c1, k, 1, 1, groups=c1, bias=False)
+        self.conv = nn.Conv2d(c1, c1, k, 1, 1, groups=c1)
         self.bn = nn.BatchNorm2d(c1)
 
     def forward(self, x):

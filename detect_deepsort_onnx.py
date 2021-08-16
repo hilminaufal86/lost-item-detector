@@ -63,8 +63,8 @@ def detect(save_img=False):
         from yolov5.models.experimental import attempt_load
         from yolov5.utils.datasets import LoadStreams, LoadImages
         from yolov5.utils.general import (
-            check_img_size, non_max_suppression, apply_classifier, scale_coords,
-            xyxy2xywh)
+            check_img_size, non_max_suppression, apply_classifier, scale_coords, check_requirements,
+            xyxy2xywh, plot_one_box)
         from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
     else:
         sys.path.insert(0, './scaledyolov4')
@@ -72,7 +72,7 @@ def detect(save_img=False):
         from scaledyolov4.utils.datasets import LoadStreams, LoadImages
         from scaledyolov4.utils.general import (
             check_img_size, non_max_suppression, apply_classifier, scale_coords,
-            xyxy2xywh)
+            xyxy2xywh, plot_one_box)
         from scaledyolov4.utils.torch_utils import select_device, load_classifier, time_synchronized
 
     webcam = source.isnumeric() or source.startswith(('rtsp://', 'rtmp://', 'http://')) or source.endswith('.txt')
@@ -85,17 +85,31 @@ def detect(save_img=False):
     half = device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load model
-    model = attempt_load(weights, map_location=device)  # load FP32 model
-    imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
-    if half:
-        model.half()  # to FP16
-
-    # Second-stage classifier
-    classify = False
-    if classify:
-        modelc = load_classifier(name='resnet101', n=2)  # initialize
-        modelc.load_state_dict(torch.load('weights/resnet101.pt', map_location=device)['model'])  # load weights
-        modelc.to(device).eval()
+    print(weights)
+    classify, pt, onnx = False, weights.endswith('.pt'), weights.endswith('.onnx')  # inference type
+    stride, names = 64, [f'class{i}' for i in range(1000)]  # assign defaults
+    if pt:
+        model = attempt_load(weights, map_location=device)  # load FP32 model
+        stride = int(model.stride.max())
+        names = model.module.names if hasattr(model, 'module') else model.names # get class names
+        # classify = False
+        if half:
+            model.half()  # to FP16
+        # Second-stage classifier
+        if classify:
+            modelc = load_classifier(name='resnet101', n=2)  # initialize
+            modelc.load_state_dict(torch.load('weights/resnet101.pt', map_location=device)['model'])  # load weights
+            modelc.to(device).eval()
+    elif onnx:
+        check_requirements(('onnx', 'onnxruntime'))
+        import onnx
+        import onnxruntime
+        onnx_model = onnx.load(weights)
+        # print(onnx.checker.check_model(onnx_model))
+        session = onnxruntime.InferenceSession(weights)
+        print('-onnx session created-')
+            
+    imgsz = check_img_size(imgsz, s=stride)  # check img_size
 
     # Set Dataloader
     vid_path, vid_writer = None, None
@@ -108,7 +122,7 @@ def detect(save_img=False):
         dataset = LoadImages(source, img_size=imgsz)
 
     # Get names and colors of object
-    names = model.module.names if hasattr(model, 'module') else model.names
+    # names = model.module.names if hasattr(model, 'module') else model.names
     colors = [[0, 100, 0], [0, 204, 204]] # colors[0] - green, colors[1] - yellow (warning)
 
     # Initialize deepsort
@@ -154,16 +168,28 @@ def detect(save_img=False):
         if not os.path.exists(ss_path):
             os.makedirs(ss_path)
 
-        img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
+        if pt:
+            img = torch.from_numpy(img).to(device)
+            img = img.half() if half else img.float()  # uint8 to fp16/32
+        elif onnx:
+            # w = h = imgsz
+            # dim = (w, h)
+            # imgresize = cv2.resize(img, (imgsz, imgsz), interpolation=cv2.INTER_AREA)
+            img = img.astype('float32')
+        print('-img size:'+img.shape+'-')
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if img.ndimension() == 3:
-            img = img.unsqueeze(0)
+        if len(img.shape) == 3:
+            # img = img.unsqueeze(0)
+            img = img[None] # expand for batch dim
 
-        # Inference
         t1 = time_synchronized()
-        pred = model(img, augment=opt.augment)[0]
-
+        # Inference
+        if pt:
+            pred = model(img, augment=opt.augment)[0]
+        elif onnx:
+            print('-pre prediction-')
+            pred = torch.tensor(session.run([session.get_outputs()[0].name], {session.get_inputs()[0].name: img}))
+            print('-post prediction-')
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
@@ -184,6 +210,7 @@ def detect(save_img=False):
             else:
                 p, s, im0 = path, '', im0s
             img_ori = im0.copy()
+            
             save_path = str(Path(out) / Path(p).name)
             txt_path = str(Path(out) / Path(p).stem) + ('_%g' % dataset.frame if dataset.mode == 'video' else '')
 
@@ -261,7 +288,6 @@ def detect(save_img=False):
                 # print(obj_status)
                 if len(obj_status)==0:
                     print('something wrong, the object has not been assign to pair')
-
                 obj_status = obj_status[0]
                 img_label = '%s %s' % (names[cls_id], trk_id)
                 warning = obj_status.warning
@@ -276,7 +302,6 @@ def detect(save_img=False):
                 obj_status = [p for p in pair.pair_list if str(p.other_track_id)==trk_id]
                 if len(obj_status)!= 0:
                     im_person = img_ori[c1[1]:c2[1], c1[0]:c2[0]]
-                    # save screenshot
                     for p in obj_status:
                         obj = [o for o in obj_list if p.obj_class_id==o[5] and p.obj_track_id==o[4]]
                         if len(obj)==0:
@@ -336,7 +361,7 @@ def detect(save_img=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='yolov5/weights/yolov5m_SGD.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', type=str, default='yolov5/weights/yolov5m_SGD.pt', help='model.pt path(s)')
     parser.add_argument('--deep_sort_weights', type=str, default='deep_sort_pytorch/deep_sort/deep/checkpoint/ckpt.t7', help='ckpt.t7 path')
     parser.add_argument('--source', type=str, default='inference/videos/VIRAT_S_010204.mp4', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')

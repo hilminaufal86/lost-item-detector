@@ -3,7 +3,7 @@ class Pair_unit:
         self.obj_class_id = obj_class_id
         self.obj_track_id = obj_track_id
         self.person_track_id = person_track_id
-        self.warning = 1
+        self.warning = 0
         self.other_track_id = -1
         self.hit = 0
         self.lost = 0
@@ -14,6 +14,8 @@ class Pair_unit:
         if self.lost > self.lost_limit:
             self.warning = 1
             self.other_track_id = other_track_id
+        else:
+            self.warning = 0
         self.lost += 1
     
     def same_pair(self):
