@@ -267,7 +267,7 @@ def detect(save_img=False):
                 warning = obj_status.warning
                 if warning:
                     img_label += ' - warning'
-                plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=2)
+                plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=1)
             
             for per in person_list:
                 c1, c2 = (int(per[0]), int(per[1])), (int(per[2]), int(per[3])) 
@@ -295,7 +295,7 @@ def detect(save_img=False):
                 img_label = '%s %s' % (names[cls_id], trk_id)
                 if warning:
                     img_label += ' - warning'
-                plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=2)
+                plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=1)
 
             t6 = time_synchronized()
             pairing_total_time += (t6 - t5)

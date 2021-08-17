@@ -4,6 +4,7 @@ import platform
 import shutil
 import time
 from pathlib import Path
+import subprocess as sp
 
 import cv2
 import torch
@@ -16,6 +17,17 @@ from utils.general import (
     check_img_size, non_max_suppression, apply_classifier, scale_coords, xyxy2xywh, plot_one_box, strip_optimizer)
 from utils.torch_utils import select_device, load_classifier, time_synchronized
 
+def get_gpu_memory():
+    output_to_list = lambda x: x.decode('ascii').split('\n')[:-1]
+    ACCEPTABLE_AVAILABLE_MEMORY = 1024
+    COMMAND = "nvidia-smi --query-gpu=memory.used --format=csv"
+    try:
+        memory_use_info = output_to_list(sp.check_output(COMMAND.split(),stderr=sp.STDOUT))[1:]
+    except sp.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+    memory_use_values = [int(x.split()[0]) for i, x in enumerate(memory_use_info)]
+    # print(memory_use_values)
+    return memory_use_values
 
 def detect(save_img=False):
     out, source, weights, view_img, save_txt, imgsz = \
@@ -34,6 +46,7 @@ def detect(save_img=False):
     imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
     if half:
         model.half()  # to FP16
+    print(get_gpu_memory())
 
     # Second-stage classifier
     classify = False
@@ -57,6 +70,8 @@ def detect(save_img=False):
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
 
     # Run inference
+    total_time = 0.
+    total_frame = 0
     t0 = time.time()
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
     _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
@@ -66,7 +81,7 @@ def detect(save_img=False):
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
-
+        total_frame += 1
         # Inference
         t1 = time_synchronized()
         pred = model(img, augment=opt.augment)[0]
@@ -74,7 +89,7 @@ def detect(save_img=False):
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
-
+        total_time += (t2 - t1)
         # Apply Classifier
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
@@ -140,7 +155,8 @@ def detect(save_img=False):
         print('Results saved to %s' % Path(out))
         if platform == 'darwin' and not opt.update:  # MacOS
             os.system('open ' + save_path)
-
+    print('Detection Total Time (%.3fs)' % (total_time))
+    print('Detection Average Time (%.3fs)' % (total_time/total_frame))
     print('Done. (%.3fs)' % (time.time() - t0))
 
 

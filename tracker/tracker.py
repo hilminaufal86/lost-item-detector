@@ -24,7 +24,7 @@ def calculate_iou(box1, box2):
     area_a = (box1[2] - box1[0]) * (box1[3] - box1[1])
     area_b = (box2[2] - box2[0]) * (box2[3] - box2[1])
 
-    return float(area_intersec) / (area_a + area_b - area_intersec)
+    return area_intersec / (area_a + area_b - area_intersec)
 
 class Tracker:
     """

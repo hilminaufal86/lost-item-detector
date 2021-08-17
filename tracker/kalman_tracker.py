@@ -23,8 +23,15 @@ def convert_z_to_bbox(z):
     """
     w = np.sqrt(z[2] * z[3])
     h = z[2] / w
+    x1 = z[0]-w/2.
+    y1 = z[1]-h/2.
+    x2 = z[0]+w/2.
+    y2 = z[1]+h/2.
+    if (x1 > x2) or (y1 > y2):
+        print('convertion to bbox when wrong. w=%.3f h=%.3f' % (w, h))
+        print([x1, y1, x2, y2])
 
-    return np.array([z[0]-w/2.,z[1]-h/2.,z[0]+w/2.,z[1]+h/2.])
+    return np.array([max(0, x1), max(0, y1), min(x2, w-1), min(y2, h-1)])
 
 class KalmanTracker(TrackerUnit):
     """

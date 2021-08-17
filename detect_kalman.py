@@ -248,14 +248,17 @@ def detect(save_img=False):
                 warning = obj_status.warning
                 if warning:
                     img_label += ' - warning'
-                plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=2)
+                plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=1)
             
             for per in person_list:
                 c1, c2 = (int(per[0]), int(per[1])), (int(per[2]), int(per[3])) 
                 trk_id = str(per[4])
                 cls_id = int(per[5])
                 obj_status = [p for p in pair.pair_list if str(p.other_track_id)==trk_id]
+                # if per[2]-per[0] <= 0 or per[3]-per[1] <=0:
                 if len(obj_status)!= 0:
+                    # print("Person size to be put in screenshot:")
+                    # print(per[:4])
                     im_person = img_ori[c1[1]:c2[1], c1[0]:c2[0]]
                     for p in obj_status:
                         obj = [o for o in obj_list if p.obj_class_id==o[5] and p.obj_track_id==o[4]]
@@ -265,8 +268,12 @@ def detect(save_img=False):
                         obj_name = names[int(obj[5])]
                         obj_trk_id = obj[4]
                         x1, y1, x2, y2 = obj[:4]
+                        # if x2-x1 <= 0 or y2-y1 <=0:
+                        # print("object size to be put in screenshot:")
+                        # print(obj[:4])
+                            # continue
                         im_obj = img_ori[y1:y2, x1:x2]
-                        create_screenshot(im_obj, im_person, ss_path, obj_name, obj_trk_id, trk_id)
+                        # create_screenshot(im_obj, im_person, ss_path, obj_name, obj_trk_id, trk_id)
 
                     obj_status = obj_status[0]
                     warning = obj_status.warning
@@ -275,7 +282,7 @@ def detect(save_img=False):
                 img_label = '%s %s' % (names[cls_id], trk_id)
                 if warning:
                     img_label += ' - warning'
-                plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=2)
+                plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=1)
             
             t6 = time_synchronized()
             pairing_total_time += (t6 - t5)
