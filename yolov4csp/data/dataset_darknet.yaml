@@ -1,0 +1,5 @@
+train: ../dataset-v3-darknet/train/images
+val: ../dataset-v3-darknet/valid/images
+
+nc: 2
+names: ['bag', 'person']
