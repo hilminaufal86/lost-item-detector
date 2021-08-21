@@ -92,7 +92,7 @@ def export_onnx(model, img, file, opset, train, dynamic, simplify):
 
 
 def run(weights='./yolov5s.pt',  # weights path
-        img_size=(640, 640),  # image (height, width)
+        img_size=(384, 640),# img_size=(640, 640),  # image (height, width)
         batch_size=1,  # batch size
         device='cpu',  # cuda device, i.e. 0 or 0,1,2,3 or cpu
         include=('torchscript', 'onnx', 'coreml'),  # include formats

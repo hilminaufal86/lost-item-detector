@@ -10,6 +10,24 @@ from .unit_object import UnitObject
 from .tracker_unit import TrackerUnit
 from .kalman_tracker import KalmanTracker
 
+def iou_batch(bb_test, bb_gt):
+    """
+    From SORT: Computes IOU between two boxes in the form [x1,y1,x2,y2]
+    """
+    bb_gt = np.expand_dims(bb_gt, 0)
+    bb_test = np.expand_dims(bb_test, 1)
+    
+    xx1 = np.maximum(bb_test[...,0], bb_gt[..., 0])
+    yy1 = np.maximum(bb_test[..., 1], bb_gt[..., 1])
+    xx2 = np.minimum(bb_test[..., 2], bb_gt[..., 2])
+    yy2 = np.minimum(bb_test[..., 3], bb_gt[..., 3])
+    w = np.maximum(0., xx2 - xx1)
+    h = np.maximum(0., yy2 - yy1)
+    wh = w * h
+    o = wh / ((bb_test[..., 2] - bb_test[..., 0]) * (bb_test[..., 3] - bb_test[..., 1])                                      
+    + (bb_gt[..., 2] - bb_gt[..., 0]) * (bb_gt[..., 3] - bb_gt[..., 1]) - wh)
+    return(o)
+
 def calculate_iou(box1, box2):
     """
     Calculate intersection over union
@@ -24,7 +42,7 @@ def calculate_iou(box1, box2):
     area_a = (box1[2] - box1[0]) * (box1[3] - box1[1])
     area_b = (box2[2] - box2[0]) * (box2[3] - box2[1])
 
-    return area_intersec / (area_a + area_b - area_intersec)
+    return float(area_intersec) / (area_a + area_b - area_intersec)
 
 class Tracker:
     """
@@ -105,7 +123,7 @@ class Tracker:
     
 
     @staticmethod
-    def assign_detections_to_trackers(unit_trackers: List[UnitObject], unit_detections: List[UnitObject], iou_thrd=0.3):
+    def assign_detections_to_trackers(unit_trackers: List[UnitObject], unit_detections: List[UnitObject], iou_thrd=0.2):
         """
         Matches Trackers and Detections
         :param unit_trackers: trackers
@@ -113,12 +131,14 @@ class Tracker:
         :param iou_thrd: threshold to qualify as a match
         :return: matches, unmatched_detections, unmatched_trackers
         """
-        IOU_mat = np.zeros((len(unit_trackers), len(unit_detections)), dtype=np.float32)
-        for t, trk in enumerate(unit_trackers):
-            for d, det in enumerate(unit_detections):
-                if trk.class_id == det.class_id:
-                    IOU_mat[t, d] = calculate_iou(trk.xyxy, det.xyxy)
-
+        # IOU_mat = np.zeros((len(unit_trackers), len(unit_detections)), dtype=np.float32)
+        # for t, trk in enumerate(unit_trackers):
+        #     for d, det in enumerate(unit_detections):
+        #         if trk.class_id == det.class_id:
+        #             IOU_mat[t, d] = calculate_iou(trk.xyxy, det.xyxy)
+        if(len(unit_trackers)==0):
+            return np.empty((0,2),dtype=int), np.arange(len(detections)), np.empty((0,5),dtype=int)
+        IOU_mat = iou_batch(unit_detections, unit_trackers)
         # Finding Matches using Hungarian Algorithm
         row_ind, col_ind = linear_assignment(-IOU_mat)
         # matched_idx = linear_assignment(-IOU_mat)

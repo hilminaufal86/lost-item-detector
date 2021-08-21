@@ -31,7 +31,7 @@ def convert_z_to_bbox(z):
         print('convertion to bbox when wrong. w=%.3f h=%.3f' % (w, h))
         print([x1, y1, x2, y2])
 
-    return np.array([max(0, x1), max(0, y1), min(x2, w-1), min(y2, h-1)])
+    return np.array([x1, max(0, y1), min(x2, w-1), min(y2, h-1)])
 
 class KalmanTracker(TrackerUnit):
     """

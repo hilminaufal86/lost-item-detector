@@ -11,8 +11,9 @@ import torch
 import torch.backends.cudnn as cudnn
 from numpy import random
 
-from tracker.tracker import Tracker
-from tracker.unit_object import UnitObject
+from sort.sort import Sort
+# from tracker.tracker import Tracker
+# from tracker.unit_object import UnitObject
 from pairs.pairing import Pairing
 
 def plot_bbox_on_img(c1, c2, img, color=None, label=None, line_thickness=None):
@@ -52,7 +53,7 @@ def detect(save_img=False):
         from yolov5.utils.datasets import LoadStreams, LoadImages
         from yolov5.utils.general import (
             check_img_size, non_max_suppression, apply_classifier, scale_coords,
-            xyxy2xywh, plot_one_box)
+            xyxy2xywh)
         from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
     else:
         sys.path.insert(0, './scaledyolov4')
@@ -60,7 +61,7 @@ def detect(save_img=False):
         from scaledyolov4.utils.datasets import LoadStreams, LoadImages
         from scaledyolov4.utils.general import (
             check_img_size, non_max_suppression, apply_classifier, scale_coords,
-            xyxy2xywh, plot_one_box)
+            xyxy2xywh)
         from scaledyolov4.utils.torch_utils import select_device, load_classifier, time_synchronized
 
     webcam = source.isnumeric() or source.startswith(('rtsp://', 'rtmp://', 'http://')) or source.endswith('.txt')
@@ -100,7 +101,8 @@ def detect(save_img=False):
     colors = [[0, 100, 0], [0, 204, 204]] # colors[0] - green, colors[1] - yellow (warning)
 
     # Initialize tracker
-    tracker = Tracker()
+    # tracker = Tracker()
+    tracker = Sort(max_age=20, min_hits=5, iou_threshold=0.2)
 
     # Initialize pairing
     pair = Pairing(names,min_lost=5)
@@ -119,7 +121,9 @@ def detect(save_img=False):
     for path, img, im0s, vid_cap in dataset:
         if (curr_vidcap!=vid_cap):
             curr_vidcap = vid_cap
-            tracker.reset()
+            # reset tracker and pair
+            tracker.trackers = []
+            tracker.frame_count = 0
             pair.reset(names, min_lost=5) 
         total_frame += 1         
 
@@ -155,6 +159,7 @@ def detect(save_img=False):
         bboxes = []
         coordinates = []
 
+        to_sort = np.empty((0,6))
         # Process detections
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
@@ -167,6 +172,8 @@ def detect(save_img=False):
 
             s += '%gx%g ' % img.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            
+
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -176,38 +183,50 @@ def detect(save_img=False):
                     n = (det[:, -1] == c).sum()  # detections per class
                     s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
+                
                 # Write results
-                for *xyxy, conf, cls in reversed(det):
-                    if save_txt:  # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, conf, *xywh) if opt.save_conf else (cls, *xywh)  # label format
-                        with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * len(line) + '\n') % line)
+                for *xyxy, conf, det_cls in reversed(det):
+                    c1, c2 = (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3]))
+                    # print(xyxy)
+                    to_sort = np.vstack((to_sort, np.array([c1[0], c1[1], c2[0], c2[1], int(conf), int(det_cls)])))
+                    # print(to_sort)
+                #     if save_txt:  # Write to file
+                #         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                #         line = (cls, conf, *xywh) if opt.save_conf else (cls, *xywh)  # label format
+                #         with open(txt_path + '.txt', 'a') as f:
+                #             f.write(('%g ' * len(line) + '\n') % line)
 
-                    if save_img or view_img:  # Add bbox to image
-                        label = '%s %.2f' % (names[int(cls)], conf)
-                        c1, c2 = (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3]))
-                        # plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
-                        # plot_bbox_on_img(c1, c2, im0, label=label, color=color[int(cls)], line_thickness=3)
-                        bboxes.append([int(cls), conf, label, c1, c2])
+                    # if save_img or view_img:  # Add bbox to image
+                #         label = '%s %.2f' % (names[int(cls)], conf)
+                        # c1, c2 = (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3]))
+                #         # plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
+                #         # plot_bbox_on_img(c1, c2, im0, label=label, color=color[int(cls)], line_thickness=3)
+                #         bboxes.append([int(cls), conf, label, c1, c2])
 
             t3 = time_synchronized()
 
-            for box in bboxes:
-                # pindah gantiin bboxes append
-                coordinates.append(UnitObject([box[3][0], box[3][1], box[4][0], box[4][1]], box[0]))
+            # for box in bboxes:
+            #     # pindah gantiin bboxes append
+            #     coordinates.append(UnitObject([box[3][0], box[3][1], box[4][0], box[4][1]], box[0]))
             
-            tracker.update(coordinates)
-
+            # tracker.update(coordinates)
+            tracked_dets = tracker.update(to_sort)
+            # print('Output from SORT:\n',tracked_dets,'\n')
             # all_obj_list = list of (x1, y1, x2, y2, track_id, class_id)
             all_obj_list = []
-            for j in range(len(tracker.tracker_list)):
-                x1 = int(tracker.tracker_list[j].unit_object.xyxy[0])
-                y1 = int(tracker.tracker_list[j].unit_object.xyxy[1])
-                x2 = int(tracker.tracker_list[j].unit_object.xyxy[2])
-                y2 = int(tracker.tracker_list[j].unit_object.xyxy[3])
-                track_id = tracker.tracker_list[j].tracking_id
-                class_id = tracker.tracker_list[j].unit_object.class_id
+            for j, track in enumerate(tracked_dets):
+                x1 = track[0]
+                y1 = track[1]
+                x2 = track[2]
+                y2 = track[3]
+                track_id = track[4]
+                class_id = track[5]
+                # x1 = int(tracker.tracker_list[j].unit_object.xyxy[0])
+                # y1 = int(tracker.tracker_list[j].unit_object.xyxy[1])
+                # x2 = int(tracker.tracker_list[j].unit_object.xyxy[2])
+                # y2 = int(tracker.tracker_list[j].unit_object.xyxy[3])
+                # track_id = tracker.tracker_list[j].tracking_id
+                # class_id = tracker.tracker_list[j].unit_object.class_id
                 all_obj_list.append([x1, y1, x2, y2, track_id, class_id])
                 # cv2.putText(im0, str(tracker.tracker_list[j].tracking_id), (x,y), 0, 0.5, (0, 0, 255), 2)
                 # print("tracker(%d) hits: %d" % (tracker.tracker_list[j].tracking_id, tracker.tracker_list[j].hits))
@@ -267,13 +286,14 @@ def detect(save_img=False):
                         obj = obj[0]
                         obj_name = names[int(obj[5])]
                         obj_trk_id = obj[4]
-                        x1, y1, x2, y2 = obj[:4]
+                        x1, y1, x2, y2 = int(obj[0]), int(obj[1]), int(obj[2]), int(obj[3])
+                        # print(obj[:4])
                         # if x2-x1 <= 0 or y2-y1 <=0:
                         # print("object size to be put in screenshot:")
                         # print(obj[:4])
                             # continue
                         im_obj = img_ori[y1:y2, x1:x2]
-                        # create_screenshot(im_obj, im_person, ss_path, obj_name, obj_trk_id, trk_id)
+                        create_screenshot(im_obj, im_person, ss_path, obj_name, obj_trk_id, trk_id)
 
                     obj_status = obj_status[0]
                     warning = obj_status.warning

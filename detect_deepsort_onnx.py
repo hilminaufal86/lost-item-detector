@@ -64,7 +64,7 @@ def detect(save_img=False):
         from yolov5.utils.datasets import LoadStreams, LoadImages
         from yolov5.utils.general import (
             check_img_size, non_max_suppression, apply_classifier, scale_coords, check_requirements,
-            xyxy2xywh, plot_one_box)
+            xyxy2xywh)
         from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
     else:
         sys.path.insert(0, './scaledyolov4')
@@ -72,7 +72,7 @@ def detect(save_img=False):
         from scaledyolov4.utils.datasets import LoadStreams, LoadImages
         from scaledyolov4.utils.general import (
             check_img_size, non_max_suppression, apply_classifier, scale_coords,
-            xyxy2xywh, plot_one_box)
+            xyxy2xywh)
         from scaledyolov4.utils.torch_utils import select_device, load_classifier, time_synchronized
 
     webcam = source.isnumeric() or source.startswith(('rtsp://', 'rtmp://', 'http://')) or source.endswith('.txt')
@@ -108,6 +108,7 @@ def detect(save_img=False):
         # print(onnx.checker.check_model(onnx_model))
         session = onnxruntime.InferenceSession(weights)
         print('-onnx session created-')
+        names = ['bag','person']
             
     imgsz = check_img_size(imgsz, s=stride)  # check img_size
 
@@ -176,7 +177,8 @@ def detect(save_img=False):
             # dim = (w, h)
             # imgresize = cv2.resize(img, (imgsz, imgsz), interpolation=cv2.INTER_AREA)
             img = img.astype('float32')
-        print('-img size:'+img.shape+'-')
+            
+        print('-img size:',img.shape,'-')
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         if len(img.shape) == 3:
             # img = img.unsqueeze(0)
@@ -240,6 +242,7 @@ def detect(save_img=False):
                     xywh_bboxes.append(xywh)
                     confs.append([conf.item()])
                     classes_id.append([int(cls)])
+                    print('detected xyxy:',xyxy)
                 
                 # print(xywh_bboxes)
             xywhs = torch.Tensor(xywh_bboxes)
@@ -300,24 +303,25 @@ def detect(save_img=False):
                 trk_id = str(per[4])
                 cls_id = int(per[5])
                 obj_status = [p for p in pair.pair_list if str(p.other_track_id)==trk_id]
-                if len(obj_status)!= 0:
-                    im_person = img_ori[c1[1]:c2[1], c1[0]:c2[0]]
-                    for p in obj_status:
-                        obj = [o for o in obj_list if p.obj_class_id==o[5] and p.obj_track_id==o[4]]
-                        if len(obj)==0:
-                            continue
-                        obj = obj[0]
-                        obj_name = names[int(obj[5])]
-                        obj_trk_id = obj[4]
-                        x1, y1, x2, y2 = obj[:4]
-                        im_obj = img_ori[y1:y2, x1:x2]
-                        create_screenshot(im_obj, im_person, ss_path, obj_name, obj_trk_id, trk_id)
+                warning = 0
+                # if len(obj_status)!= 0:
+                #     im_person = img_ori[c1[1]:c2[1], c1[0]:c2[0]]
+                #     for p in obj_status:
+                #         obj = [o for o in obj_list if p.obj_class_id==o[5] and p.obj_track_id==o[4]]
+                #         if len(obj)==0:
+                #             continue
+                #         obj = obj[0]
+                #         obj_name = names[int(obj[5])]
+                #         obj_trk_id = obj[4]
+                #         x1, y1, x2, y2 = obj[:4]
+                #         im_obj = img_ori[y1:y2, x1:x2]
+                #         create_screenshot(im_obj, im_person, ss_path, obj_name, obj_trk_id, trk_id)
 
-                    obj_status = obj_status[0]
-                    warning = obj_status.warning
-                else:
-                    warning = 0
-                img_label = '%s %s' % (names[cls_id], trk_id)
+                #     obj_status = obj_status[0]
+                #     warning = obj_status.warning
+                # else:
+                #     warning = 0
+                # img_label = '%s %s' % (names[cls_id], trk_id)
                 if warning:
                     img_label += ' - warning'
                 plot_bbox_on_img(c1, c2, im0, label=img_label, color=colors[warning], line_thickness=2)
