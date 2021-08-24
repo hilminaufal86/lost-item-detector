@@ -26,18 +26,24 @@ class DeepSort(object):
     def update(self, bbox_xywh, confidences, ori_img, cls_id):
         self.height, self.width = ori_img.shape[:2]
         # generate detections
-        features = self._get_features(bbox_xywh, ori_img)
-        bbox_tlwh = self._xywh_to_tlwh(bbox_xywh)
+        if len(bbox_xywh)==0 or len(confidences)==0 or len(cls_id)==0:
+            features = []
+            bbox_tlwh = []
+        else:
+            features = self._get_features(bbox_xywh, ori_img)
+            bbox_tlwh = self._xywh_to_tlwh(bbox_xywh)
         detections = [Detection(bbox_tlwh[i], conf, features[i], cls_id[i]) for i, conf in enumerate(
             confidences) if conf > self.min_confidence]
 
         # run on non-maximum supression
-        boxes = np.array([d.tlwh for d in detections])
-        scores = np.array([d.confidence for d in detections])
+        # if len(detections)>0:
+        #     boxes = np.array([d.tlwh for d in detections])
+        #     scores = np.array([d.confidence for d in detections])
 
         # update tracker
         self.tracker.predict()
-        self.tracker.update(detections)
+        if len(detections)>0:
+            self.tracker.update(detections)
 
         # output bbox identities
         outputs = []
@@ -64,6 +70,7 @@ class DeepSort(object):
             bbox_tlwh = bbox_xywh.copy()
         elif isinstance(bbox_xywh, torch.Tensor):
             bbox_tlwh = bbox_xywh.clone()
+        # print(bbox_xywh)
         bbox_tlwh[:, 0] = bbox_xywh[:, 0] - bbox_xywh[:, 2] / 2.
         bbox_tlwh[:, 1] = bbox_xywh[:, 1] - bbox_xywh[:, 3] / 2.
         return bbox_tlwh

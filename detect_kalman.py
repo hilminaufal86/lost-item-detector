@@ -30,6 +30,10 @@ def plot_bbox_on_img(c1, c2, img, color=None, label=None, line_thickness=None):
         cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
 def create_screenshot(im1, im2, save_path, obj_name, obj_id, per_id):
+    label = obj_name + '-' + str(obj_id) + '-person-' + str(per_id) + '.jpg'
+    path = str(Path(save_path) / Path(label))
+    if os.path.exists(path):
+        return
     h1, w1 = im1.shape[:2]
     h2, w2 = im2.shape[:2]
 
@@ -39,8 +43,6 @@ def create_screenshot(im1, im2, save_path, obj_name, obj_id, per_id):
     img[:h1, :w1, :3] = im1
     img[:h2, w1:w1+w2, :3] = im2
 
-    label = obj_name + '-' + str(obj_id) + '-person-' + str(per_id) + '.jpg'
-    path = str(Path(save_path) / Path(label))
     cv2.imwrite(path, img)
 
 def detect(save_img=False):
@@ -52,7 +54,7 @@ def detect(save_img=False):
         from yolov5.models.experimental import attempt_load
         from yolov5.utils.datasets import LoadStreams, LoadImages
         from yolov5.utils.general import (
-            check_img_size, non_max_suppression, apply_classifier, scale_coords,
+            check_img_size, check_imshow, non_max_suppression, apply_classifier, scale_coords,
             xyxy2xywh)
         from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
     else:
@@ -89,7 +91,7 @@ def detect(save_img=False):
     # Set Dataloader
     vid_path, vid_writer = None, None
     if webcam:
-        view_img = True
+        view_img = check_imshow()
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz)
     else:
@@ -311,7 +313,7 @@ def detect(save_img=False):
             # Stream results
             if view_img:
                 cv2.imshow(p, im0)
-                if cv2.waitKey(1) == ord('q'):  # q to quit
+                if cv2.waitKey(100) == ord('q'):  # q to quit
                     raise StopIteration
 
             # Save results (image with detections)

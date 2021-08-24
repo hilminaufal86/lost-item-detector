@@ -41,6 +41,10 @@ def plot_bbox_on_img(c1, c2, img, color=None, label=None, line_thickness=None):
         cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
 def create_screenshot(im1, im2, save_path, obj_name, obj_id, per_id):
+    label = obj_name + '-' + str(obj_id) + '-person-' + str(per_id) + '.jpg'
+    path = str(Path(save_path) / Path(label))
+    if os.path.exists(path):
+        return
     h1, w1 = im1.shape[:2]
     h2, w2 = im2.shape[:2]
 
@@ -50,8 +54,6 @@ def create_screenshot(im1, im2, save_path, obj_name, obj_id, per_id):
     img[:h1, :w1, :3] = im1
     img[:h2, w1:w1+w2, :3] = im2
 
-    label = obj_name + '-' + str(obj_id) + '-person-' + str(per_id) + '.jpg'
-    path = str(Path(save_path) / Path(label))
     cv2.imwrite(path, img)
 
 def detect(save_img=False):
@@ -63,7 +65,7 @@ def detect(save_img=False):
         from yolov5.models.experimental import attempt_load
         from yolov5.utils.datasets import LoadStreams, LoadImages
         from yolov5.utils.general import (
-            check_img_size, non_max_suppression, apply_classifier, scale_coords,
+            check_img_size, check_imshow, non_max_suppression, apply_classifier, scale_coords,
             xyxy2xywh)
         from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
     else:
@@ -86,7 +88,8 @@ def detect(save_img=False):
 
     # Load model
     model = attempt_load(weights, map_location=device)  # load FP32 model
-    imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
+    stride = int(model.stride.max())
+    imgsz = check_img_size(imgsz, s=stride)  # check img_size
     if half:
         model.half()  # to FP16
 
@@ -100,12 +103,12 @@ def detect(save_img=False):
     # Set Dataloader
     vid_path, vid_writer = None, None
     if webcam:
-        view_img = True
+        view_img = check_imshow()
         cudnn.benchmark = True  # set True to speed up constant image size inference
-        dataset = LoadStreams(source, img_size=imgsz)
+        dataset = LoadStreams(source, img_size=imgsz, stride=stride)
     else:
         save_img = True
-        dataset = LoadImages(source, img_size=imgsz)
+        dataset = LoadImages(source, img_size=imgsz, stride=stride)
 
     # Get names and colors of object
     names = model.module.names if hasattr(model, 'module') else model.names
@@ -174,9 +177,13 @@ def detect(save_img=False):
             pred = apply_classifier(pred, modelc, img, im0s)
 
         # initialize bboxes and coordinates
-        bboxes = []
-        coordinates = []
+        # bboxes = []
+        # coordinates = []
         
+        # xywh_bboxes = np.empty((0,4))
+        xywh_bboxes = []
+        confs = []
+        classes_id = []
         # Process detections
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
@@ -194,9 +201,6 @@ def detect(save_img=False):
 
             t3 = time_synchronized()
             
-            xywh_bboxes = []
-            confs = []
-            classes_id = []
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -210,17 +214,20 @@ def detect(save_img=False):
                 for *xyxy, conf, cls in reversed(det):
                     x_c, y_c, bbox_w, bbox_h = xyxy_to_xywh(*xyxy)
                     xywh = [x_c, y_c, bbox_w, bbox_h]
+                    # xywh_bboxes = np.append(xywh_bboxes,np.array(xywh))
                     xywh_bboxes.append(xywh)
                     confs.append([conf.item()])
                     classes_id.append([int(cls)])
                 
-                # print(xywh_bboxes)
+            if len(xywh_bboxes)==0:
+                xywh_bboxes.append([])
+            print(xywh_bboxes)
             xywhs = torch.Tensor(xywh_bboxes)
             confss = torch.Tensor(confs)
             clss_id = torch.Tensor(classes_id)
-
+            
             outputs = deepsort.update(xywhs, confss, im0, clss_id)
-
+            
             # all_obj_list = list of (x1, y1, x2, y2, track_id, class_id)
             t4 = time_synchronized()
             tracking_total_time += (t4 - t3)
@@ -302,7 +309,8 @@ def detect(save_img=False):
 
             # Stream results
             if view_img:
-                cv2.imshow(p, im0)
+                cv2.imshow(str(p), im0)
+                # cv2.waitKey(10)  # 1 millisecond
                 if cv2.waitKey(1) == ord('q'):  # q to quit
                     raise StopIteration
 
