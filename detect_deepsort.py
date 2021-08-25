@@ -55,6 +55,7 @@ def create_screenshot(im1, im2, save_path, obj_name, obj_id, per_id):
     img[:h2, w1:w1+w2, :3] = im2
 
     cv2.imwrite(path, img)
+    cv2.destroyAllWindows()
 
 def detect(save_img=False):
     out, source, weights, view_img, save_txt, imgsz= \
@@ -221,7 +222,7 @@ def detect(save_img=False):
                 
             if len(xywh_bboxes)==0:
                 xywh_bboxes.append([])
-            print(xywh_bboxes)
+            # print(xywh_bboxes)
             xywhs = torch.Tensor(xywh_bboxes)
             confss = torch.Tensor(confs)
             clss_id = torch.Tensor(classes_id)

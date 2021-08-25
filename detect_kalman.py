@@ -44,6 +44,7 @@ def create_screenshot(im1, im2, save_path, obj_name, obj_id, per_id):
     img[:h2, w1:w1+w2, :3] = im2
 
     cv2.imwrite(path, img)
+    cv2.destroyAllWindows()
 
 def detect(save_img=False):
     out, source, weights, view_img, save_txt, imgsz= \
@@ -313,7 +314,7 @@ def detect(save_img=False):
             # Stream results
             if view_img:
                 cv2.imshow(p, im0)
-                if cv2.waitKey(100) == ord('q'):  # q to quit
+                if cv2.waitKey(1) == ord('q'):  # q to quit
                     raise StopIteration
 
             # Save results (image with detections)
