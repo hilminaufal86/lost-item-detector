@@ -29,20 +29,72 @@ def plot_bbox_on_img(c1, c2, img, color=None, label=None, line_thickness=None):
         cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
         cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
-def create_screenshot(im1, im2, save_path, obj_name, obj_id, per_id):
+# def create_screenshot(im1, im2, save_path, obj_name, obj_id, per_id):
+#     label = obj_name + '-' + str(obj_id) + '-person-' + str(per_id) + '.jpg'
+#     path = str(Path(save_path) / Path(label))
+#     if os.path.exists(path):
+#         return
+#     h1, w1 = im1.shape[:2]
+#     h2, w2 = im2.shape[:2]
+
+#     # create empty matrix
+#     img = np.zeros((max(h1, h2), w1 + w2, 3), np.uint8)
+
+#     img[:h1, :w1, :3] = im1
+#     img[:h2, w1:w1+w2, :3] = im2
+
+#     cv2.imwrite(path, img)
+#     cv2.destroyAllWindows()
+
+def save_screenshot(im0, save_path, obj_name, obj_id, per_id, obj_bbox, per_bbox, crop, first_detect):
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
     label = obj_name + '-' + str(obj_id) + '-person-' + str(per_id) + '.jpg'
     path = str(Path(save_path) / Path(label))
-    if os.path.exists(path):
+    if os.path.exists(path) and first_detect:
         return
-    h1, w1 = im1.shape[:2]
-    h2, w2 = im2.shape[:2]
+    
+    if crop:
+        x1, y1, x2, y2 = obj_bbox[:4]
+        im_obj = im0[y1:y2, x1:x2]
 
-    # create empty matrix
-    img = np.zeros((max(h1, h2), w1 + w2, 3), np.uint8)
+        x1, y1, x2, y2 = per_bbox[:4]
+        im_person = im0[y1:y2, x1:x2]
 
-    img[:h1, :w1, :3] = im1
-    img[:h2, w1:w1+w2, :3] = im2
+        h1, w1 = im1.shape[:2]
+        h2, w2 = im2.shape[:2]
 
+        img = np.zeros((max(h1, h2), w1 + w2, 3), np.uint8)
+
+        img[:h1, :w1, :3] = im_obj
+        img[:h2, w1:w1+w2, :3] = im_person
+    else:
+        img = im0.copy()
+        c1, c2 = (int(obj_bbox[0]), int(obj_bbox[1])), (int(obj_bbox[2]), int(obj_bbox[3]))
+        label_name = obj_name + '-' + str(obj_id)
+        plot_bbox_on_img(c1, c2, img, label=label_name, color=[0, 204, 204], line_thickness=2)
+
+        c1, c2 = (int(per_bbox[0]), int(per_bbox[1])), (int(per_bbox[2]), int(per_bbox[3]))
+        label_name = 'person-' + str(per_id)
+        plot_bbox_on_img(c1, c2, img, label=label_name, color=[0, 204, 204], line_thickness=2)
+
+    cv2.imwrite(path, img)
+    cv2.destroyAllWindows()
+
+def save_inventory(im0, save_path, obj_name, obj_id, obj_bbox, first_detect):
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
+    label = obj_name + '-' + str(obj_id) + '.jpg'
+    path = str(Path(save_path) / Path(label))
+    if os.path.exists(path) and first_detect:
+        return
+    print('save inventory in'+path)
+
+    img = im0.copy()
+    c1, c2 = (int(obj_bbox[0]), int(obj_bbox[1])), (int(obj_bbox[2]), int(obj_bbox[3]))
+    plot_bbox_on_img(c1, c2, img, label=label, color=[0, 100, 0], line_thickness=2)
     cv2.imwrite(path, img)
     cv2.destroyAllWindows()
 
@@ -109,6 +161,8 @@ def detect(save_img=False):
 
     # Initialize pairing
     pair = Pairing(names,min_lost=5)
+    crop = opt.crop_screenshot
+    first_detect = opt.first_detect
     
     # time
     detection_total_time = 0.
@@ -276,12 +330,11 @@ def detect(save_img=False):
                 c1, c2 = (int(per[0]), int(per[1])), (int(per[2]), int(per[3])) 
                 trk_id = str(per[4])
                 cls_id = int(per[5])
+                per_bbox = per[:4]
                 obj_status = [p for p in pair.pair_list if str(p.other_track_id)==trk_id]
-                # if per[2]-per[0] <= 0 or per[3]-per[1] <=0:
                 if len(obj_status)!= 0:
-                    # print("Person size to be put in screenshot:")
-                    # print(per[:4])
-                    im_person = img_ori[c1[1]:c2[1], c1[0]:c2[0]]
+                    # im_person = img_ori[c1[1]:c2[1], c1[0]:c2[0]]
+                    # save screenshot
                     for p in obj_status:
                         obj = [o for o in obj_list if p.obj_class_id==o[5] and p.obj_track_id==o[4]]
                         if len(obj)==0:
@@ -289,14 +342,11 @@ def detect(save_img=False):
                         obj = obj[0]
                         obj_name = names[int(obj[5])]
                         obj_trk_id = obj[4]
-                        x1, y1, x2, y2 = int(obj[0]), int(obj[1]), int(obj[2]), int(obj[3])
-                        # print(obj[:4])
-                        # if x2-x1 <= 0 or y2-y1 <=0:
-                        # print("object size to be put in screenshot:")
-                        # print(obj[:4])
-                            # continue
-                        im_obj = img_ori[y1:y2, x1:x2]
-                        create_screenshot(im_obj, im_person, ss_path, obj_name, obj_trk_id, trk_id)
+                        obj_bbox = obj[:4]
+                        save_screenshot(img_ori, ss_path, obj_name, obj_trk_id, trk_id, obj_bbox, per_bbox, crop, first_detect)
+                        # x1, y1, x2, y2 = obj[:4]
+                        # im_obj = img_ori[y1:y2, x1:x2]
+                        # create_screenshot(im_obj, im_person, ss_path, obj_name, obj_trk_id, trk_id)
 
                     obj_status = obj_status[0]
                     warning = obj_status.warning
@@ -362,6 +412,9 @@ if __name__ == '__main__':
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     # parser.add_argument('--update', action='store_true', help='update all models')
     parser.add_argument('--scaledyolov4', action='store_true', help='using yolov5 or scaledyolov4 model for object detection, default yolov5')
+    parser.add_argument("--crop-screenshot", action='store_true', help='is screenshot will be saved as cropped images or in labels, default false')
+    parser.add_argument('--first-detect', action='store_true', help='save screenshot of object at first detect else last detect, default last')
+    
     opt = parser.parse_args()
     print(opt)
 
