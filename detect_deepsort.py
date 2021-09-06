@@ -101,11 +101,12 @@ def save_inventory(im0, save_path, obj_name, obj_id, obj_bbox, first_detect):
     path = str(Path(save_path) / Path(label))
     if os.path.exists(path) and first_detect:
         return
-    print('save inventory in'+path)
+    # print('save inventory in'+path)
 
     img = im0.copy()
+    label_name = obj_name + '-' + str(obj_id)
     c1, c2 = (int(obj_bbox[0]), int(obj_bbox[1])), (int(obj_bbox[2]), int(obj_bbox[3]))
-    plot_bbox_on_img(c1, c2, img, label=label, color=[0, 100, 0], line_thickness=2)
+    plot_bbox_on_img(c1, c2, img, label=label_name, color=[0, 100, 0], line_thickness=2)
     cv2.imwrite(path, img)
     cv2.destroyAllWindows()
 
@@ -119,9 +120,9 @@ def detect(save_img=False):
         from yolov5.models.experimental import attempt_load
         from yolov5.utils.datasets import LoadStreams, LoadImages
         from yolov5.utils.general import (
-            check_img_size, check_imshow, non_max_suppression, apply_classifier, scale_coords,
+            check_img_size, check_imshow, non_max_suppression, apply_classifier, scale_coords, check_requirements,
             xyxy2xywh)
-        from yolov5.utils.torch_utils import select_device, load_classifier, time_synchronized
+        from yolov5.utils.torch_utils import select_device, load_classifier, time_sync as time_synchronized
     else:
         sys.path.insert(0, './scaledyolov4')
         from scaledyolov4.models.experimental import attempt_load
@@ -141,11 +142,30 @@ def detect(save_img=False):
     half = device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load model
-    model = attempt_load(weights, map_location=device)  # load FP32 model
-    stride = int(model.stride.max())
+    w = weights[0] if isinstance(weights, list) else weights
+    classify, suffix = False, Path(w).suffix.lower()
+    pt, onnx = (suffix == x for x in ['.pt', '.onnx'])
+
+    if pt:
+        model = attempt_load(weights, map_location=device)  # load FP32 model
+        stride = int(model.stride.max())  # model stride
+        names = model.module.names if hasattr(model, 'module') else model.names  # get class names
+        if half:
+            model.half()  # to FP16
+        if classify:  # second-stage classifier
+            modelc = load_classifier(name='resnet50', n=2)  # initialize
+            modelc.load_state_dict(torch.load('resnet50.pt', map_location=device)['model']).to(device).eval()
+    elif onnx:
+        check_requirements(('onnx', 'onnxruntime'))
+        import onnxruntime
+        session = onnxruntime.InferenceSession(w, None)
+        stride = 64
+        names = ['bag', 'person']
+    # model = attempt_load(weights, map_location=device)  # load FP32 model
+    # stride = int(model.stride.max())
     imgsz = check_img_size(imgsz, s=stride)  # check img_size
-    if half:
-        model.half()  # to FP16
+    # if half:
+    #     model.half()  # to FP16
 
     # Second-stage classifier
     classify = False
@@ -165,7 +185,7 @@ def detect(save_img=False):
         dataset = LoadImages(source, img_size=imgsz, stride=stride)
 
     # Get names and colors of object
-    names = model.module.names if hasattr(model, 'module') else model.names
+    # names = model.module.names if hasattr(model, 'module') else model.names
     colors = [[0, 100, 0], [0, 204, 204]] # colors[0] - green, colors[1] - yellow (warning)
 
     # Initialize deepsort
@@ -191,7 +211,8 @@ def detect(save_img=False):
     # Run inference
     t0 = time.time()
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
-    _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
+    if pt:
+        _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
     curr_vidcap = None # for different video file
     for path, img, im0s, vid_cap in dataset:
         if (curr_vidcap!=vid_cap):
@@ -215,16 +236,26 @@ def detect(save_img=False):
         if not os.path.exists(ss_path):
             os.makedirs(ss_path)
 
-        img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if img.ndimension() == 3:
-            img = img.unsqueeze(0)
+        # img = torch.from_numpy(img).to(device)
+        # img = img.half() if half else img.float()  # uint8 to fp16/32
+        # img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        # if img.ndimension() == 3:
+        #     img = img.unsqueeze(0)
+        if onnx:
+            img = img.astype('float32')
+        else:
+            img = torch.from_numpy(img).to(device)
+            img = img.half() if half else img.float()  # uint8 to fp16/32
+        img = img / 255.0  # 0 - 255 to 0.0 - 1.0
+        if len(img.shape) == 3:
+            img = img[None]  # expand for batch dim
 
         # Inference
         t1 = time_synchronized()
-        pred = model(img, augment=opt.augment)[0]
-
+        if pt:
+            pred = model(img, augment=opt.augment)[0]
+        elif onnx:
+            pred = torch.tensor(session.run([session.get_outputs()[0].name], {session.get_inputs()[0].name: img}))
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
