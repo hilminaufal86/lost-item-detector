@@ -15,6 +15,7 @@ from deep_sort_pytorch.utils.parser import get_config
 from deep_sort_pytorch.deep_sort import DeepSort
 from pairs.pairing import Pairing
 
+
 def xyxy_to_xywh(*xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
     bbox_left = min([xyxy[0].item(), xyxy[2].item()])
@@ -123,6 +124,7 @@ def detect(save_img=False):
             check_img_size, check_imshow, non_max_suppression, apply_classifier, scale_coords, check_requirements,
             xyxy2xywh)
         from yolov5.utils.torch_utils import select_device, load_classifier, time_sync as time_synchronized
+    
     else:
         sys.path.insert(0, './scaledyolov4')
         from scaledyolov4.models.experimental import attempt_load
@@ -137,11 +139,13 @@ def detect(save_img=False):
     if opt.deepsort:
         from deep_sort_pytorch.utils.parser import get_config
         from deep_sort_pytorch.deep_sort import DeepSort
+    
     else:
         from sort.sort import Sort
 
     # Initialize
     device = select_device(opt.device)
+    
     if os.path.exists(out):  # output dir
         shutil.rmtree(out)  # delete dir
     os.makedirs(out)  # make new dir
@@ -150,27 +154,50 @@ def detect(save_img=False):
     # Load model
     w = weights[0] if isinstance(weights, list) else weights
     classify, suffix = False, Path(w).suffix.lower()
-    pt, onnx = (suffix == x for x in ['.pt', '.onnx'])
+    pt, onnx, ov = (suffix == x for x in ['.pt', '.onnx', '.xml'])
+    stride = 64
 
     if pt:
         model = attempt_load(weights, map_location=device)  # load FP32 model
         stride = int(model.stride.max())  # model stride
-        names = model.module.names if hasattr(model, 'module') else model.names  # get class names
+        
         if half:
             model.half()  # to FP16
         if classify:  # second-stage classifier
             modelc = load_classifier(name='resnet50', n=2)  # initialize
             modelc.load_state_dict(torch.load('resnet50.pt', map_location=device)['model']).to(device).eval()
+    
     elif onnx:
         check_requirements(('onnx', 'onnxruntime'))
         import onnxruntime
         session = onnxruntime.InferenceSession(w, None)
-        stride = 64
-        names = ['bag', 'person']
+        # names = ['bag', 'person']
+
+    elif ov:
+        from openvino.inference_engine import IECore
+        from yolov5.openvino_ext import YoloParams, letterbox, parse_yolo_region, intersection_over_union, ov_non_max_suppression
+
+        ie = IECore()
+        net = ie.read_network(model=w)
+        input_blob = next(iter(net.input_info))
+        # Read and pre-process input images
+        n, c, ov_h, ov_w = net.input_info[input_blob].input_data.shape
+        net.batch_size = 1
+        exec_net = ie.load_network(network=net, num_requests=2, device_name=opt.device.upper())
+
+    if pt:
+        names = model.module.names if hasattr(model, 'module') else model.names  # get class names
+    else:
+        if os.path.isfile(opt.labels):
+            with open(opt.labels, 'r') as f:
+                names = [x.strip() for x in f]
+        else:
+            names = [f'class{i}' for i in range(1000)]
 
     imgsz = check_img_size(imgsz, s=stride)  # check img_size
-    
+    colors = [[0, 100, 0], [0, 204, 204]] # colors[0] - green, colors[1] - yellow (warning)
     classify = False
+    
     if classify:
         modelc = load_classifier(name='resnet101', n=2)  # initialize
         modelc.load_state_dict(torch.load('weights/resnet101.pt', map_location=device)['model'])  # load weights
@@ -178,19 +205,18 @@ def detect(save_img=False):
 
     # Set Dataloader
     vid_path, vid_writer = None, None
+    
     if webcam:
         view_img = check_imshow()
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
         save_img = True
+    
     else:
         save_img = True
         dataset = LoadImages(source, img_size=imgsz, stride=stride)
 
-    # Get colors of object
-    colors = [[0, 100, 0], [0, 204, 204]] # colors[0] - green, colors[1] - yellow (warning)
-
-    # Initialize deepsort
+    # Initialize deepsort or sort
     if opt.deepsort:
         cfg = get_config()
         cfg.merge_from_file(opt.config_deepsort)
@@ -199,6 +225,7 @@ def detect(save_img=False):
                             nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
                             max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
                             use_cuda=True)
+    
     else:
         tracker = Sort(max_age=20, min_hits=5, iou_threshold=0.2)
     
@@ -220,9 +247,11 @@ def detect(save_img=False):
         _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
     curr_vidcap = None # for different video file
     for path, img, im0s, vid_cap in dataset:
+        
         if (curr_vidcap!=vid_cap):
             curr_vidcap = vid_cap
             pair.reset(names, min_lost=5) 
+            
             if opt.deepsort:   
                 deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
                             max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
@@ -242,15 +271,25 @@ def detect(save_img=False):
         else:
             ss_path = str(Path(out) / Path(path).stem / Path("screenshot"))
             inven_path = str(Path(out) / Path(path).stem / Path("inventory"))  
+        
         if not os.path.exists(ss_path):
             os.makedirs(ss_path)
 
         if onnx:
             img = img.astype('float32')
+        
+        elif ov:
+            img_size = img.shape[1:]
+            imgr = img.transpose((1,2,0)) # CHW to HWC
+            img = letterbox(imgr, (ov_w,ov_h))
+            img = img.transpose((2,0,1))
+        
         else:
             img = torch.from_numpy(img).to(device)
             img = img.half() if half else img.float()  # uint8 to fp16/32
-        img = img / 255.0  # 0 - 255 to 0.0 - 1.0
+        
+        if not ov:
+            img = img / 255.0  # 0 - 255 to 0.0 - 1.0
         if len(img.shape) == 3:
             img = img[None]  # expand for batch dim
 
@@ -260,23 +299,39 @@ def detect(save_img=False):
             pred = model(img, augment=opt.augment)[0]
         elif onnx:
             pred = torch.tensor(session.run([session.get_outputs()[0].name], {session.get_inputs()[0].name: img}))
+        elif ov:
+            ov_objects = list()
+            res = exec_net.infer(inputs={input_blob: img})
+            for layer_name, out_blob in res.items():
+                # print(out_blob.shape)
+                layer_params = YoloParams(side=out_blob.shape[2])
+                # log.info("Layer {} parameters: ".format(layer_name))
+                # layer_params.log_params()
+                ov_objects += parse_yolo_region(out_blob, img.shape[2:],
+                                             img_size, layer_params,
+                                             opt.conf_thres)
+        
         # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        if ov:
+            pred = ov_non_max_suppression(ov_objects, opt.iou_thres, opt.conf_thres, img_size)
+        
+        else:
+            pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        
         t2 = time_synchronized()
-
         detection_total_time += (t2 - t1)
+
+        # print(pred)
         # Apply Classifier (second-stage)
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
 
         if opt.deepsort:
-            # initialize bboxes and coordinates
-            bboxes = []
-            coordinates = []
-        else:
             xywh_bboxes = []
             confs = []
             classes_id = []
+            
+        else:
             to_sort = np.empty((0,6))
         all_obj_list = []
         # xywh_bboxes = np.empty((0,4))
@@ -323,6 +378,8 @@ def detect(save_img=False):
                 if len(xywh_bboxes)==0:
                     xywh_bboxes.append([])
                 xywhs = torch.Tensor(xywh_bboxes)
+                # print(xywhs)
+                # print(img_size)
                 confss = torch.Tensor(confs)
                 clss_id = torch.Tensor(classes_id)
                 
@@ -473,6 +530,7 @@ if __name__ == '__main__':
     parser.add_argument("--crop-screenshot", action='store_true', help='is screenshot will be saved as cropped images or in labels, default false')
     parser.add_argument('--first-detect', action='store_true', help='save screenshot of object at first detect else last detect, default last')
     parser.add_argument('--deepsort', action='store_true', help='use deepsort or sort, default sort')
+    parser.add_argument('--labels', type=str, default='yolov5/data/dataset.names', help='labels for onnx or openvino model')
     opt = parser.parse_args()
     print(opt)
 

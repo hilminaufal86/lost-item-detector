@@ -1,0 +1,8 @@
+YOLOv5s:
+python "C:/Program Files (x86)/Intel/openvino_2021.4.582/deployment_tools/model_optimizer/mo.py" --input_model weights/yolov5s_augmented.onnx --model_name weights/yolov5s -s 255 --reverse_input_channels --output Conv_663,Conv_610,Conv_557
+
+YOLOv5m:
+python "C:/Program Files (x86)/Intel/openvino_2021.4.582/deployment_tools/model_optimizer/mo.py" --input_model weights/yolov5l_augmented.onnx --model_name weights/yolov5l -s 255 --reverse_input_channels --output Conv_886,Conv_833,Conv_780
+
+YOLOv5l:
+python "C:/Program Files (x86)/Intel/openvino_2021.4.582/deployment_tools/model_optimizer/mo.py" --input_model weights/yolov5l_augmented.onnx --model_name weights/yolov5l -s 255 --reverse_input_channels --output Conv_1109,Conv_1056,Conv_1003

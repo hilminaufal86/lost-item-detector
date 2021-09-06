@@ -25,6 +25,7 @@ from utils.general import check_img_size, check_requirements, check_imshow, colo
     apply_classifier, scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, save_one_box
 from utils.plots import Annotator, colors
 from utils.torch_utils import select_device, load_classifier, time_sync
+from openvino_ext import YoloParams, letterbox, parse_yolo_region, intersection_over_union, ov_non_max_suppression
 
 
 @torch.no_grad()
@@ -63,13 +64,14 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
 
     # Initialize
     set_logging()
+    device_name = device
     device = select_device(device)
     half &= device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load model
     w = weights[0] if isinstance(weights, list) else weights
     classify, suffix = False, Path(w).suffix.lower()
-    pt, onnx, tflite, pb, saved_model = (suffix == x for x in ['.pt', '.onnx', '.tflite', '.pb', ''])  # backend
+    pt, onnx, tflite, pb, ov, saved_model = (suffix == x for x in ['.pt', '.onnx', '.tflite', '.pb', '.xml', ''])  # backend
     stride, names = 64, [f'class{i}' for i in range(1000)]  # assign defaults
     if pt:
         model = attempt_load(weights, map_location=device)  # load FP32 model
@@ -84,6 +86,16 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
         check_requirements(('onnx', 'onnxruntime'))
         import onnxruntime
         session = onnxruntime.InferenceSession(w, None)
+    elif ov:
+        # check_requirements(('openvino'))
+        from openvino.inference_engine import IENetwork, IECore
+        ie = IECore()
+        net = ie.read_network(model=w)
+        input_blob = next(iter(net.input_info))
+        # Read and pre-process input images
+        n, c, ov_h, ov_w = net.input_info[input_blob].input_data.shape
+        net.batch_size = 1
+        exec_net = ie.load_network(network=net, num_requests=2, device_name=device_name)
     else:  # TensorFlow models
         check_requirements(('tensorflow>=2.4.1',))
         import tensorflow as tf
@@ -125,20 +137,42 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
     for path, img, im0s, vid_cap in dataset:
         if onnx:
             img = img.astype('float32')
+        elif ov:
+            img_size = img.shape[1:]
+            imgr = img.transpose((1,2,0)) # CHW to HWC
+            img = letterbox(imgr, (ov_w,ov_h))
+            img = img.transpose((2,0,1))
+            
         else:
             img = torch.from_numpy(img).to(device)
             img = img.half() if half else img.float()  # uint8 to fp16/32
-        img = img / 255.0  # 0 - 255 to 0.0 - 1.0
+        if not ov:    
+            img = img / 255.0  # 0 - 255 to 0.0 - 1.0
         if len(img.shape) == 3:
-            img = img[None]  # expand for batch dim
-
+            img = img[None]  # expand for batch dim => (n,c,h,w)
+        # print(img.shape)
         # Inference
         t1 = time_sync()
         if pt:
             visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
             pred = model(img, augment=augment, visualize=visualize)[0]
+            # print(res)
+            # print(res.shape)
         elif onnx:
             pred = torch.tensor(session.run([session.get_outputs()[0].name], {session.get_inputs()[0].name: img}))
+        elif ov:
+            ov_objects = list()
+            res = exec_net.infer(inputs={input_blob: img})
+            for layer_name, out_blob in res.items():
+                # print(out_blob.shape)
+                layer_params = YoloParams(side=out_blob.shape[2])
+                # log.info("Layer {} parameters: ".format(layer_name))
+                # layer_params.log_params()
+                ov_objects += parse_yolo_region(out_blob, img.shape[2:],
+                                             img_size, layer_params,
+                                             opt.conf_thres)
+            # print(res)
+            # print(res.shape)
         else:  # tensorflow model (tflite, pb, saved_model)
             imn = img.permute(0, 2, 3, 1).cpu().numpy()  # image in numpy
             if pb:
@@ -162,16 +196,21 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
             pred = torch.tensor(pred)
 
         # NMS
-        pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+        if ov:
+            pred = ov_non_max_suppression(ov_objects, opt.iou_thres, opt.conf_thres, img_size)
+        else:
+            pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
         t2 = time_sync()
 
         # Second-stage classifier (optional)
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
-
+        # print(len(pred))
+        # print(pred)
+        # break
         # Process predictions
         for i, det in enumerate(pred):  # detections per image
-            if webcam:  # batch_size >= 1
+            if webcam:
                 p, s, im0, frame = path[i], f'{i}: ', im0s[i].copy(), dataset.count
             else:
                 p, s, im0, frame = path, '', im0s.copy(), getattr(dataset, 'frame', 0)
@@ -180,11 +219,12 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
             save_path = str(save_dir / p.name)  # img.jpg
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             s += '%gx%g ' % img.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            # gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             imc = im0.copy() if save_crop else im0  # for save_crop
             annotator = Annotator(im0, line_width=line_thickness, pil=not ascii)
             if len(det):
                 # Rescale boxes from img_size to im0 size
+                # if not ov:
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
                 # Print results
@@ -253,7 +293,7 @@ def parse_opt():
     parser.add_argument('--conf-thres', type=float, default=0.25, help='confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='NMS IoU threshold')
     parser.add_argument('--max-det', type=int, default=1000, help='maximum detections per image')
-    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--device', default='CPU', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--view-img', action='store_true', help='show results')
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
     parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')

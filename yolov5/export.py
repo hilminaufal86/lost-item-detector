@@ -166,7 +166,7 @@ def run(weights='./yolov5s.pt',  # weights path
 def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='weights/yolov5s_augmented.pt', help='weights path')
-    parser.add_argument('--img-size', nargs='+', type=int, default=[384, 640], help='image (height, width)')
+    parser.add_argument('--img-size', nargs='+', type=int, default=[640, 640], help='image (height, width)')
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--include', nargs='+', default=['onnx'], help='include formats') # default=['torchscript', 'onnx', 'coreml']
