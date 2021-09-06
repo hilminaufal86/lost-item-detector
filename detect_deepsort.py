@@ -134,6 +134,12 @@ def detect(save_img=False):
 
     webcam = source.isnumeric() or source.startswith(('rtsp://', 'rtmp://', 'http://')) or source.endswith('.txt')
 
+    if opt.deepsort:
+        from deep_sort_pytorch.utils.parser import get_config
+        from deep_sort_pytorch.deep_sort import DeepSort
+    else:
+        from sort.sort import Sort
+
     # Initialize
     device = select_device(opt.device)
     if os.path.exists(out):  # output dir
@@ -161,13 +167,9 @@ def detect(save_img=False):
         session = onnxruntime.InferenceSession(w, None)
         stride = 64
         names = ['bag', 'person']
-    # model = attempt_load(weights, map_location=device)  # load FP32 model
-    # stride = int(model.stride.max())
-    imgsz = check_img_size(imgsz, s=stride)  # check img_size
-    # if half:
-    #     model.half()  # to FP16
 
-    # Second-stage classifier
+    imgsz = check_img_size(imgsz, s=stride)  # check img_size
+    
     classify = False
     if classify:
         modelc = load_classifier(name='resnet101', n=2)  # initialize
@@ -185,19 +187,21 @@ def detect(save_img=False):
         save_img = True
         dataset = LoadImages(source, img_size=imgsz, stride=stride)
 
-    # Get names and colors of object
-    # names = model.module.names if hasattr(model, 'module') else model.names
+    # Get colors of object
     colors = [[0, 100, 0], [0, 204, 204]] # colors[0] - green, colors[1] - yellow (warning)
 
     # Initialize deepsort
-    cfg = get_config()
-    cfg.merge_from_file(opt.config_deepsort)
-    deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
-                        max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
-                        nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
-                        max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
-                        use_cuda=True)
-
+    if opt.deepsort:
+        cfg = get_config()
+        cfg.merge_from_file(opt.config_deepsort)
+        deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
+                            max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
+                            nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
+                            max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
+                            use_cuda=True)
+    else:
+        tracker = Sort(max_age=20, min_hits=5, iou_threshold=0.2)
+    
     # Initialize pairing
     pair = Pairing(names,min_lost=5)
     crop = opt.crop_screenshot
@@ -218,12 +222,16 @@ def detect(save_img=False):
     for path, img, im0s, vid_cap in dataset:
         if (curr_vidcap!=vid_cap):
             curr_vidcap = vid_cap
-            pair.reset(names, min_lost=5)    
-            deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
-                        max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
-                        nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
-                        max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
-                        use_cuda=True)      
+            pair.reset(names, min_lost=5) 
+            if opt.deepsort:   
+                deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
+                            max_dist=cfg.DEEPSORT.MAX_DIST, min_confidence=cfg.DEEPSORT.MIN_CONFIDENCE,
+                            nms_max_overlap=cfg.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg.DEEPSORT.MAX_IOU_DISTANCE,
+                            max_age=cfg.DEEPSORT.MAX_AGE, n_init=cfg.DEEPSORT.N_INIT, nn_budget=cfg.DEEPSORT.NN_BUDGET,
+                            use_cuda=True)
+            else:
+                tracker.trackers = []
+                tracker.frame_count = 0      
 
         total_frame += 1   
 
@@ -237,11 +245,6 @@ def detect(save_img=False):
         if not os.path.exists(ss_path):
             os.makedirs(ss_path)
 
-        # img = torch.from_numpy(img).to(device)
-        # img = img.half() if half else img.float()  # uint8 to fp16/32
-        # img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        # if img.ndimension() == 3:
-        #     img = img.unsqueeze(0)
         if onnx:
             img = img.astype('float32')
         else:
@@ -266,14 +269,17 @@ def detect(save_img=False):
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
 
-        # initialize bboxes and coordinates
-        # bboxes = []
-        # coordinates = []
-        
+        if opt.deepsort:
+            # initialize bboxes and coordinates
+            bboxes = []
+            coordinates = []
+        else:
+            xywh_bboxes = []
+            confs = []
+            classes_id = []
+            to_sort = np.empty((0,6))
+        all_obj_list = []
         # xywh_bboxes = np.empty((0,4))
-        xywh_bboxes = []
-        confs = []
-        classes_id = []
         # Process detections
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
@@ -301,31 +307,30 @@ def detect(save_img=False):
                     s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
                 # Write results
-                for *xyxy, conf, cls in reversed(det):
-                    x_c, y_c, bbox_w, bbox_h = xyxy_to_xywh(*xyxy)
-                    xywh = [x_c, y_c, bbox_w, bbox_h]
-                    # xywh_bboxes = np.append(xywh_bboxes,np.array(xywh))
-                    xywh_bboxes.append(xywh)
-                    confs.append([conf.item()])
-                    classes_id.append([int(cls)])
-                
-            if len(xywh_bboxes)==0:
-                xywh_bboxes.append([])
-            # print(xywh_bboxes)
-            xywhs = torch.Tensor(xywh_bboxes)
-            confss = torch.Tensor(confs)
-            clss_id = torch.Tensor(classes_id)
-            
-            outputs = deepsort.update(xywhs, confss, im0, clss_id)
-            
-            # all_obj_list = list of (x1, y1, x2, y2, track_id, class_id)
-            t4 = time_synchronized()
-            tracking_total_time += (t4 - t3)
-            # print('tracking time %.3fs' % (t4 - t3))
-            all_obj_list = []
+                for *xyxy, conf, det_cls in reversed(det):
+                    if opt.deepsort:
+                        x_c, y_c, bbox_w, bbox_h = xyxy_to_xywh(*xyxy)
+                        xywh = [x_c, y_c, bbox_w, bbox_h]
 
-            print('%sDone. (%.3fs)' % (s, t2 - t1))
+                        xywh_bboxes.append(xywh)
+                        confs.append([conf.item()])
+                        classes_id.append([int(det_cls)])
+                    else:
+                        c1, c2 = (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3]))
+                        to_sort = np.vstack((to_sort, np.array([c1[0], c1[1], c2[0], c2[1], int(conf), int(det_cls)])))
+                
+            if opt.deepsort:
+                if len(xywh_bboxes)==0:
+                    xywh_bboxes.append([])
+                xywhs = torch.Tensor(xywh_bboxes)
+                confss = torch.Tensor(confs)
+                clss_id = torch.Tensor(classes_id)
+                
+                outputs = deepsort.update(xywhs, confss, im0, clss_id)
             
+            else:
+                outputs = tracker.update(to_sort)
+                
             if len(outputs)>0:
                 for output in outputs:
                     x1 = int(output[0])
@@ -335,6 +340,15 @@ def detect(save_img=False):
                     track_id = output[4]
                     class_id = output[5]
                     all_obj_list.append([x1, y1, x2, y2, track_id, class_id])
+
+            # all_obj_list = list of (x1, y1, x2, y2, track_id, class_id)
+            t4 = time_synchronized()
+            tracking_total_time += (t4 - t3)
+            # print('tracking time %.3fs' % (t4 - t3))
+            
+
+            print('%sDone. (%.3fs)' % (s, t2 - t1))
+            
 
             t5 = time_synchronized()
 
@@ -458,6 +472,7 @@ if __name__ == '__main__':
     parser.add_argument("--config_deepsort", type=str, default="deep_sort_pytorch/configs/deep_sort.yaml")
     parser.add_argument("--crop-screenshot", action='store_true', help='is screenshot will be saved as cropped images or in labels, default false')
     parser.add_argument('--first-detect', action='store_true', help='save screenshot of object at first detect else last detect, default last')
+    parser.add_argument('--deepsort', action='store_true', help='use deepsort or sort, default sort')
     opt = parser.parse_args()
     print(opt)
 
