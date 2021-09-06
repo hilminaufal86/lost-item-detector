@@ -128,7 +128,7 @@ def detect(save_img=False):
         from scaledyolov4.models.experimental import attempt_load
         from scaledyolov4.utils.datasets import LoadStreams, LoadImages
         from scaledyolov4.utils.general import (
-            check_img_size, non_max_suppression, apply_classifier, scale_coords,
+            check_img_size, check_imshow, non_max_suppression, apply_classifier, scale_coords, check_requirements,
             xyxy2xywh)
         from scaledyolov4.utils.torch_utils import select_device, load_classifier, time_synchronized
 
@@ -180,6 +180,7 @@ def detect(save_img=False):
         view_img = check_imshow()
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
+        save_img = True
     else:
         save_img = True
         dataset = LoadImages(source, img_size=imgsz, stride=stride)

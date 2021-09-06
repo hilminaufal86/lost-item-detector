@@ -44,6 +44,15 @@ def torch_distributed_zero_first(local_rank: int):
     if local_rank == 0:
         torch.distributed.barrier()
 
+def try_except(func):
+    # try-except function. Usage: @try_except decorator
+    def handler(*args, **kwargs):
+        try:
+            func(*args, **kwargs)
+        except Exception as e:
+            print(e)
+
+    return handler
 
 def init_seeds(seed=0):
     random.seed(seed)
@@ -56,6 +65,38 @@ def get_latest_run(search_dir='./runs'):
     last_list = glob.glob(f'{search_dir}/**/last*.pt', recursive=True)
     return max(last_list, key=os.path.getctime)
 
+def colorstr(*input):
+    # Colors a string https://en.wikipedia.org/wiki/ANSI_escape_code, i.e.  colorstr('blue', 'hello world')
+    *args, string = input if len(input) > 1 else ('blue', 'bold', input[0])  # color arguments, string
+    colors = {'black': '\033[30m',  # basic colors
+              'red': '\033[31m',
+              'green': '\033[32m',
+              'yellow': '\033[33m',
+              'blue': '\033[34m',
+              'magenta': '\033[35m',
+              'cyan': '\033[36m',
+              'white': '\033[37m',
+              'bright_black': '\033[90m',  # bright colors
+              'bright_red': '\033[91m',
+              'bright_green': '\033[92m',
+              'bright_yellow': '\033[93m',
+              'bright_blue': '\033[94m',
+              'bright_magenta': '\033[95m',
+              'bright_cyan': '\033[96m',
+              'bright_white': '\033[97m',
+              'end': '\033[0m',  # misc
+              'bold': '\033[1m',
+              'underline': '\033[4m'}
+    return ''.join(colors[x] for x in args) + f'{string}' + colors['end']
+
+def emojis(str=''):
+    # Return platform-dependent emoji-safe version of string
+    return str.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else str
+
+
+def file_size(file):
+    # Return file size in MB
+    return Path(file).stat().st_size / 1e6
 
 def check_git_status():
     # Suggest 'git pull' if repo is out of date
@@ -64,6 +105,40 @@ def check_git_status():
         if 'Your branch is behind' in s:
             print(s[s.find('Your branch is behind'):s.find('\n\n')] + '\n')
 
+@try_except
+def check_requirements(requirements='requirements.txt', exclude=(), install=True):
+    # Check installed dependencies meet requirements (pass *.txt file or list of packages)
+    prefix = colorstr('red', 'bold', 'requirements:')
+    check_python()  # check python version
+    if isinstance(requirements, (str, Path)):  # requirements.txt file
+        file = Path(requirements)
+        assert file.exists(), f"{prefix} {file.resolve()} not found, check failed."
+        requirements = [f'{x.name}{x.specifier}' for x in pkg.parse_requirements(file.open()) if x.name not in exclude]
+    else:  # list or tuple of packages
+        requirements = [x for x in requirements if x not in exclude]
+
+    n = 0  # number of packages updates
+    for r in requirements:
+        try:
+            pkg.require(r)
+        except Exception as e:  # DistributionNotFound or VersionConflict if requirements not met
+            s = f"{prefix} {r} not found and is required by YOLOv5"
+            if install:
+                print(f"{s}, attempting auto-update...")
+                try:
+                    assert check_online(), f"'pip install {r}' skipped (offline)"
+                    print(check_output(f"pip install '{r}'", shell=True).decode())
+                    n += 1
+                except Exception as e:
+                    print(f'{prefix} {e}')
+            else:
+                print(f'{s}. Please install and rerun your command.')
+
+    if n:  # if packages updated
+        source = file.resolve() if 'file' in locals() else requirements
+        s = f"{prefix} {n} package{'s' * (n > 1)} updated per {source}\n" \
+            f"{prefix} ⚠️ {colorstr('bold', 'Restart runtime or rerun command for updates to take effect')}\n"
+        print(emojis(s))
 
 def check_img_size(img_size, s=32):
     # Verify img_size is a multiple of stride s
@@ -71,7 +146,20 @@ def check_img_size(img_size, s=32):
     if new_size != img_size:
         print('WARNING: --img-size %g must be multiple of max stride %g, updating to %g' % (img_size, s, new_size))
     return new_size
-
+    
+def check_imshow():
+    # Check if environment supports image displays
+    try:
+        assert not is_docker(), 'cv2.imshow() is disabled in Docker environments'
+        assert not is_colab(), 'cv2.imshow() is disabled in Google Colab environments'
+        cv2.imshow('test', np.zeros((1, 1, 3)))
+        cv2.waitKey(1)
+        cv2.destroyAllWindows()
+        cv2.waitKey(1)
+        return True
+    except Exception as e:
+        print(f'WARNING: Environment does not support cv2.imshow() or PIL Image.show() image displays\n{e}')
+        return False
 
 def check_anchors(dataset, model, thr=4.0, imgsz=640):
     # Check anchor fit to data, recompute if necessary
