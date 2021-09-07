@@ -5,6 +5,7 @@ import shutil
 import time
 from pathlib import Path
 import numpy as np
+import fnmatch
 
 import cv2
 import torch
@@ -15,6 +16,17 @@ from deep_sort_pytorch.utils.parser import get_config
 from deep_sort_pytorch.deep_sort import DeepSort
 from pairs.pairing import Pairing
 
+def timestamp(curr_frame, fps):
+    duration = curr_frame/fps
+
+    minutes = int(duration/60)
+    seconds = int(duration%60)
+    if seconds < 10:
+        tstamp =str(minutes) + '.0' + str(seconds)
+    else:
+        tstamp =str(minutes) + '.' + str(seconds)
+
+    return tstamp
 
 def xyxy_to_xywh(*xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
@@ -41,31 +53,25 @@ def plot_bbox_on_img(c1, c2, img, color=None, label=None, line_thickness=None):
         cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
         cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
-# def crop_screenshot(im1, im2, save_path, obj_name, obj_id, per_id): # save object screenshot by crop img
-#     label = obj_name + '-' + str(obj_id) + '-person-' + str(per_id) + '.jpg'
-#     path = str(Path(save_path) / Path(label))
-#     if os.path.exists(path):
-#         return
-#     h1, w1 = im1.shape[:2]
-#     h2, w2 = im2.shape[:2]
 
-#     # create empty matrix
-#     img = np.zeros((max(h1, h2), w1 + w2, 3), np.uint8)
-
-#     img[:h1, :w1, :3] = im1
-#     img[:h2, w1:w1+w2, :3] = im2
-
-#     cv2.imwrite(path, img)
-#     cv2.destroyAllWindows()
-
-def save_screenshot(im0, save_path, obj_name, obj_id, per_id, obj_bbox, per_bbox, crop, first_detect):
+def save_screenshot(im0, save_path, obj_name, obj_id, per_id, obj_bbox, per_bbox, crop, first_detect, curr_frame, fps):
+    name = obj_name + '-' + str(obj_id)
+    save_path = str(Path(save_path) / Path(name))
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
-    label = obj_name + '-' + str(obj_id) + '-person-' + str(per_id) + '.jpg'
-    path = str(Path(save_path) / Path(label))
-    if os.path.exists(path) and first_detect:
-        return
+    file_contain = 'person-' + str(per_id) + '*.jpg'
+    
+    for file in os.listdir(save_path):
+        if fnmatch.fnmatch(file,file_contain):
+            if first_detect:
+                return
+            else:
+                os.remove(file)
+            break
+    
+    save_file = 'person-' + str(per_id) + '--' + timestamp(curr_frame, fps) +'.jpg'
+    path = str(Path(save_path) / Path(save_file))
     
     if crop:
         x1, y1, x2, y2 = obj_bbox[:4]
@@ -215,6 +221,7 @@ def detect(save_img=False):
     else:
         save_img = True
         dataset = LoadImages(source, img_size=imgsz, stride=stride)
+        
 
     # Initialize deepsort or sort
     if opt.deepsort:
@@ -232,13 +239,14 @@ def detect(save_img=False):
     # Initialize pairing
     pair = Pairing(names,min_lost=5)
     crop = opt.crop_screenshot
-    first_detect = opt.first_detect
+    first_detect = not opt.last_detect
 
     # time
     detection_total_time = 0.
     tracking_total_time = 0.
     pairing_total_time = 0.
     total_frame = 0
+    curr_frame = 0
 
     # Run inference
     t0 = time.time()
@@ -247,10 +255,13 @@ def detect(save_img=False):
         _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
     curr_vidcap = None # for different video file
     for path, img, im0s, vid_cap in dataset:
-        
+        # if frame_curr_vid == 0:
+        fps = vid_cap.get(cv2.CAP_PROP_FPS)
+
         if (curr_vidcap!=vid_cap):
             curr_vidcap = vid_cap
             pair.reset(names, min_lost=5) 
+            curr_frame = 0
             
             if opt.deepsort:   
                 deepsort = DeepSort(cfg.DEEPSORT.REID_CKPT,
@@ -263,6 +274,7 @@ def detect(save_img=False):
                 tracker.frame_count = 0      
 
         total_frame += 1   
+        curr_frame += 1
 
         if webcam:
             ss_path = str(Path(out) / Path("webcam/screenshot"))
@@ -281,8 +293,8 @@ def detect(save_img=False):
         elif ov:
             img_size = img.shape[1:]
             imgr = img.transpose((1,2,0)) # CHW to HWC
-            img = letterbox(imgr, (ov_w,ov_h))
-            img = img.transpose((2,0,1))
+            img = letterbox(imgr, (ov_w,ov_h)) # W == H
+            img = img.transpose((2,0,1))# HWC to CHW
         
         else:
             img = torch.from_numpy(img).to(device)
@@ -291,7 +303,7 @@ def detect(save_img=False):
         if not ov:
             img = img / 255.0  # 0 - 255 to 0.0 - 1.0
         if len(img.shape) == 3:
-            img = img[None]  # expand for batch dim
+            img = img[None]  # expand for batch dim => (n,c,w,h)
 
         # Inference
         t1 = time_synchronized()
@@ -310,7 +322,6 @@ def detect(save_img=False):
                 ov_objects += parse_yolo_region(out_blob, img.shape[2:],
                                              img_size, layer_params,
                                              opt.conf_thres)
-        
         # Apply NMS
         if ov:
             pred = ov_non_max_suppression(ov_objects, opt.iou_thres, opt.conf_thres, img_size)
@@ -322,6 +333,7 @@ def detect(save_img=False):
         detection_total_time += (t2 - t1)
 
         # print(pred)
+        # break
         # Apply Classifier (second-stage)
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
@@ -340,7 +352,7 @@ def detect(save_img=False):
             if webcam:  # batch_size >= 1
                 p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
             else:
-                p, s, im0 = path, '', im0s
+                p, s, im0 = path, '', im0s.copy()
             img_ori = im0.copy()
             save_path = str(Path(out) / Path(p).name)
             txt_path = str(Path(out) / Path(p).stem) + ('_%g' % dataset.frame if dataset.mode == 'video' else '')
@@ -354,8 +366,9 @@ def detect(save_img=False):
             
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
+                # if not ov:
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
-
+                # print(det)
                 # Print results
                 for c in det[:, -1].unique():
                     n = (det[:, -1] == c).sum()  # detections per class
@@ -365,13 +378,18 @@ def detect(save_img=False):
                 for *xyxy, conf, det_cls in reversed(det):
                     if opt.deepsort:
                         x_c, y_c, bbox_w, bbox_h = xyxy_to_xywh(*xyxy)
+                        if int(bbox_w)<=0 or int(bbox_h)<=0:
+                            continue
                         xywh = [x_c, y_c, bbox_w, bbox_h]
-
+                        # print(xyxy)
+                        # print(xywh)
                         xywh_bboxes.append(xywh)
                         confs.append([conf.item()])
                         classes_id.append([int(det_cls)])
                     else:
                         c1, c2 = (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3]))
+                        if c1[0]==c2[0] or c1[1]==c2[1]:
+                            continue
                         to_sort = np.vstack((to_sort, np.array([c1[0], c1[1], c2[0], c2[1], int(conf), int(det_cls)])))
                 
             if opt.deepsort:
@@ -387,7 +405,8 @@ def detect(save_img=False):
             
             else:
                 outputs = tracker.update(to_sort)
-                
+            # print(outputs)
+            # break
             if len(outputs)>0:
                 for output in outputs:
                     x1 = int(output[0])
@@ -456,7 +475,7 @@ def detect(save_img=False):
                         obj_name = names[int(obj[5])]
                         obj_trk_id = obj[4]
                         obj_bbox = obj[:4]
-                        save_screenshot(img_ori, ss_path, obj_name, obj_trk_id, trk_id, obj_bbox, per_bbox, crop, first_detect)
+                        save_screenshot(img_ori, ss_path, obj_name, obj_trk_id, trk_id, obj_bbox, per_bbox, crop, first_detect, curr_frame, fps)
                         # x1, y1, x2, y2 = obj[:4]
                         # im_obj = img_ori[y1:y2, x1:x2]
                         # create_screenshot(im_obj, im_person, ss_path, obj_name, obj_trk_id, trk_id)
@@ -497,7 +516,8 @@ def detect(save_img=False):
                         vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
                     vid_writer.write(im0)
 
-    if save_txt or save_img:
+    if save_img:
+        vid_writer.release()
         print('Results saved to %s' % Path(out))
 
     print('Detection Total Time (%.3fs)' % (detection_total_time))
@@ -514,8 +534,8 @@ if __name__ == '__main__':
     parser.add_argument('--deep_sort_weights', type=str, default='deep_sort_pytorch/deep_sort/deep/checkpoint/ckpt.t7', help='ckpt.t7 path')
     parser.add_argument('--source', type=str, default='inference/videos/VIRAT_S_010204.mp4', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
-    parser.add_argument('--conf-thres', type=float, default=0.5, help='object confidence threshold')
-    parser.add_argument('--iou-thres', type=float, default=0.5, help='IOU threshold for NMS')
+    parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
+    parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--view-img', action='store_true', help='display results')
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
@@ -528,7 +548,7 @@ if __name__ == '__main__':
     parser.add_argument('--scaledyolov4', action='store_true', help='using yolov5 or scaledyolov4 model for object detection, default yolov5')
     parser.add_argument("--config_deepsort", type=str, default="deep_sort_pytorch/configs/deep_sort.yaml")
     parser.add_argument("--crop-screenshot", action='store_true', help='is screenshot will be saved as cropped images or in labels, default false')
-    parser.add_argument('--first-detect', action='store_true', help='save screenshot of object at first detect else last detect, default last')
+    parser.add_argument('--last-detect', action='store_true', help='save screenshot of object at first detect else last detect, default first')
     parser.add_argument('--deepsort', action='store_true', help='use deepsort or sort, default sort')
     parser.add_argument('--labels', type=str, default='yolov5/data/dataset.names', help='labels for onnx or openvino model')
     opt = parser.parse_args()

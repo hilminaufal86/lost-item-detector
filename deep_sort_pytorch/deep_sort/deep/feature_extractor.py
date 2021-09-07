@@ -33,6 +33,7 @@ class Extractor(object):
             4. normalize
         """
         def _resize(im, size):
+            # print(im.shape)
             return cv2.resize(im.astype(np.float32)/255., size)
 
         im_batch = torch.cat([self.norm(_resize(im, self.size)).unsqueeze(

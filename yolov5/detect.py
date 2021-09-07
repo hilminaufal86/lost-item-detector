@@ -206,7 +206,7 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
         # print(len(pred))
-        # print(pred)
+        print(pred)
         # break
         # Process predictions
         for i, det in enumerate(pred):  # detections per image
@@ -226,6 +226,7 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
                 # Rescale boxes from img_size to im0 size
                 # if not ov:
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+                print(det)
 
                 # Print results
                 for c in det[:, -1].unique():

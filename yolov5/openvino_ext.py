@@ -85,7 +85,13 @@ def letterbox(img, size=(640, 640), color=(114, 114, 114), auto=True, scaleFill=
 
 
 def scale_bbox(x, y, height, width, class_id, confidence, im_h, im_w, resized_im_h=640, resized_im_w=640):
+    # if resized_im_h*resized_im_w > im_h*im_w:
+    # #     gain = max(resized_im_w / im_w, resized_im_h / im_h)
+    #     gain = min(im_w / resized_im_w, im_h / resized_im_h)
+    # else:
     gain = min(resized_im_w / im_w, resized_im_h / im_h)  # gain  = old / new
+    # gain_w = resized_im_w / im_w
+    # gain_h = resized_im_h / im_h
     pad = (resized_im_w - im_w * gain) / 2, (resized_im_h - im_h * gain) / 2  # wh padding
     x = int((x - pad[0])/gain)
     y = int((y - pad[1])/gain)
@@ -95,8 +101,8 @@ def scale_bbox(x, y, height, width, class_id, confidence, im_h, im_w, resized_im
  
     xmin = max(0, int(x - w / 2))
     ymin = max(0, int(y - h / 2))
-    xmax = min(im_w, int(xmin + w))
-    ymax = min(im_h, int(ymin + h))
+    xmax = min(im_w-1, int(x + w / 2))
+    ymax = min(im_h-1, int(y + h / 2))
     # Method item() used here to convert NumPy types to native types for compatibility with functions, which don't
     # support Numpy types (e.g., cv2.rectangle doesn't support int64 in color parameter)
     return dict(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax, class_id=class_id.item(), confidence=confidence.item())
