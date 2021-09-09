@@ -25,7 +25,6 @@ from utils.general import check_img_size, check_requirements, check_imshow, colo
     apply_classifier, scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, save_one_box
 from utils.plots import Annotator, colors
 from utils.torch_utils import select_device, load_classifier, time_sync
-from openvino_ext import YoloParams, letterbox, parse_yolo_region, intersection_over_union, ov_non_max_suppression
 
 
 @torch.no_grad()
@@ -88,6 +87,7 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
         session = onnxruntime.InferenceSession(w, None)
     elif ov:
         # check_requirements(('openvino'))
+        from openvino_ext import YoloParams, letterbox, parse_yolo_region, intersection_over_union, ov_non_max_suppression
         from openvino.inference_engine import IENetwork, IECore
         ie = IECore()
         net = ie.read_network(model=w)

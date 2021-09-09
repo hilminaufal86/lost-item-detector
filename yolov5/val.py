@@ -85,7 +85,7 @@ def run(data,
         conf_thres=0.001,  # confidence threshold
         iou_thres=0.6,  # NMS IoU threshold
         task='val',  # train, val, test, speed or study
-        device='',  # cuda device, i.e. 0 or 0,1,2,3 or cpu
+        device='CPU',  # cuda device, i.e. 0 or 0,1,2,3 or cpu
         single_cls=False,  # treat as single-class dataset
         augment=False,  # augmented inference
         verbose=False,  # verbose output
@@ -102,8 +102,7 @@ def run(data,
         save_dir=Path(''),
         plots=True,
         callbacks=Callbacks(),
-        compute_loss=None,
-        onnx=False
+        compute_loss=None
         ):
     # Initialize/load model and set device
     training = model is not None
@@ -118,19 +117,35 @@ def run(data,
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
         # Load model
+        w = weights[0] if isinstance(weights, list) else weights
+        suffix = Path(w).suffix.lower()
+        pt, onnx, ov = (suffix == x for x in ['.pt', '.onnx','.xml'])  # backend
+        gs = 64
+
         if onnx:
-            w = weights[0] if isinstance(weights, list) else weights
+            # w = weights[0] if isinstance(weights, list) else weights
             check_requirements(('onnx', 'onnxruntime'))
             import onnxruntime
             session = onnxruntime.InferenceSession(w, None)
-            gs = 64
             # names = ['bag','person']
             names = {0: 'bag', 1: 'person'}
-        else:
+        elif pt:
             model = attempt_load(weights, map_location=device)  # load FP32 model
             gs = max(int(model.stride.max()), 32)
             # names = model.names if hasattr(model, 'names') else model.module.names
             names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
+        elif ov:
+            # w = weights[0] if isinstance(weights, list) else weights
+            from openvino_ext import YoloParams, letterbox, parse_yolo_region, intersection_over_union, ov_non_max_suppression
+            from openvino.inference_engine import IENetwork, IECore
+            ie = IECore()
+            net = ie.read_network(model=w)
+            input_blob = next(iter(net.input_info))
+            # Read and pre-process input images
+            n, c, ov_h, ov_w = net.input_info[input_blob].input_data.shape
+            net.batch_size = 1
+            exec_net = ie.load_network(network=net, num_requests=2, device_name='CPU') 
+            names = {0: 'bag', 1: 'person'}
         imgsz = check_img_size(imgsz, s=gs)  # check img_size
         # model = attempt_load(weights, map_location=device)  # load FP32 model
         # gs = max(int(model.stride.max()), 32)  # grid size (max stride)
@@ -149,7 +164,7 @@ def run(data,
         model.half()
 
     # Configure
-    if not onnx:
+    if pt:
         model.eval()
     is_coco = isinstance(data.get('val'), str) and data['val'].endswith('coco/val2017.txt')  # COCO dataset
     nc = 1 if single_cls else int(data['nc'])  # number of classes
@@ -178,12 +193,29 @@ def run(data,
             img = img.numpy().astype('float32')
             # print(img[0].shape)
             
-        else:
+        elif pt:
             img = img.to(device, non_blocking=True)
             img = img.half() if half else img.float()  # uint8 to fp16/32
+        elif ov:
+            # print(img.shape)
+            # img_size = img.shape[1:]
+            img = img.numpy()
+            img = img[0]
+            img_size = img.shape[1:]
+            imgr = img.transpose((1,2,0)) # CHW to HWC
+            img = letterbox(imgr, (ov_w,ov_h))
+            img = img.transpose((2,0,1))
+            if len(img.shape) == 3:
+                img = img[None]
+            # print(img.shape)
+            # print('\n')
         # img = img.to(device, non_blocking=True)
         # img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        if not ov:    
+            img = img / 255.0  # 0 - 255 to 0.0 - 1.0
+        
+        if len(img.shape) == 3:
+            img = img[None]
         targets = targets.to(device)
         nb, _, height, width = img.shape  # batch size, channels, height, width
         t = time_sync()
@@ -193,20 +225,33 @@ def run(data,
         if onnx:
             out = torch.tensor(session.run([session.get_outputs()[0].name], {session.get_inputs()[0].name: img}))
             train_out = None
-        else:
+        elif pt:
             out, train_out = model(img, augment=augment)  # inference and training outputs
         # out, train_out = model(img, augment=augment)  # inference and training outputs
+        elif ov:
+            ov_objects = list()
+            res = exec_net.infer(inputs={input_blob: img})
+            for layer_name, out_blob in res.items():
+                # print(out_blob.shape)
+                layer_params = YoloParams(side=out_blob.shape[2])
+                # log.info("Layer {} parameters: ".format(layer_name))
+                # layer_params.log_params()
+                ov_objects += parse_yolo_region(out_blob, img.shape[2:],
+                                             img_size, layer_params,
+                                             conf_thres)
         t1 += time_sync() - t
-
         # Compute loss
-        if compute_loss and not onnx:
+        if compute_loss and pt:
             loss += compute_loss([x.float() for x in train_out], targets)[1]  # box, obj, cls
 
         # Run NMS
         targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
         lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
         t = time_sync()
-        out = non_max_suppression(out, conf_thres, iou_thres, labels=lb, multi_label=True, agnostic=single_cls)
+        if onnx or pt:
+            out = non_max_suppression(out, conf_thres, iou_thres, labels=lb, multi_label=True, agnostic=single_cls)
+        else:
+            out = ov_non_max_suppression(ov_objects, iou_thres, conf_thres, img_size)
         t2 += time_sync() - t
 
         # Statistics per image
@@ -329,9 +374,9 @@ def parse_opt():
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='confidence threshold')
-    parser.add_argument('--iou-thres', type=float, default=0.6, help='NMS IoU threshold')
+    parser.add_argument('--iou-thres', type=float, default=0.5, help='NMS IoU threshold')
     parser.add_argument('--task', default='val', help='train, val, test, speed or study')
-    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--device', default='CPU', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--single-cls', action='store_true', help='treat as single-class dataset')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--verbose', action='store_true', help='report mAP by class')
@@ -343,7 +388,7 @@ def parse_opt():
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
-    parser.add_argument('--onnx', action='store_true')
+    
     opt = parser.parse_args()
     opt.save_json |= opt.data.endswith('coco.yaml')
     opt.save_txt |= opt.save_hybrid
