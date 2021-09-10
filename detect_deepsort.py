@@ -216,7 +216,6 @@ def detect(save_img=False):
         view_img = check_imshow()
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
-        save_img = True
     
     else:
         save_img = True
@@ -256,7 +255,10 @@ def detect(save_img=False):
     curr_vidcap = None # for different video file
     for path, img, im0s, vid_cap in dataset:
         # if frame_curr_vid == 0:
-        fps = vid_cap.get(cv2.CAP_PROP_FPS)
+        if webcam:
+            fps = 25
+        else:
+            fps = vid_cap.get(cv2.CAP_PROP_FPS)
 
         if (curr_vidcap!=vid_cap):
             curr_vidcap = vid_cap
