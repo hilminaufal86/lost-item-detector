@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 import numpy as np
 import fnmatch
+import datetime
 
 import cv2
 import torch
@@ -16,15 +17,24 @@ from deep_sort_pytorch.utils.parser import get_config
 from deep_sort_pytorch.deep_sort import DeepSort
 from pairs.pairing import Pairing
 
-def timestamp(curr_frame, fps):
+def timestamp_offline(curr_frame, fps):
     duration = curr_frame/fps
 
+    hours = int(duration/3600)
     minutes = int(duration/60)
     seconds = int(duration%60)
-    if seconds < 10:
-        tstamp =str(minutes) + '.0' + str(seconds)
+    if hours < 10:
+        tstamp = '0' + str(hours) + '.'
     else:
-        tstamp =str(minutes) + '.' + str(seconds)
+        tstamp = str(hours) + '.'
+    if minutes < 10:
+        tstamp += '0' + str(minutes) + '.'
+    else:
+        tstamp += str(minutes) + '.'
+    if seconds < 10:
+        tstamp += '0' + str(seconds)
+    else:
+        tstamp += str(seconds)
 
     return tstamp
 
@@ -54,7 +64,7 @@ def plot_bbox_on_img(c1, c2, img, color=None, label=None, line_thickness=None):
         cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
 
-def save_screenshot(im0, save_path, obj_name, obj_id, per_id, obj_bbox, per_bbox, crop, first_detect, curr_frame, fps):
+def save_screenshot(im0, save_path, obj_name, obj_id, per_id, obj_bbox, per_bbox, crop, first_detect, timestamp):
     name = obj_name + '-' + str(obj_id)
     save_path = str(Path(save_path) / Path(name))
     if not os.path.exists(save_path):
@@ -70,7 +80,7 @@ def save_screenshot(im0, save_path, obj_name, obj_id, per_id, obj_bbox, per_bbox
                 os.remove(file)
             break
     
-    save_file = 'person-' + str(per_id) + '--' + timestamp(curr_frame, fps) +'.jpg'
+    save_file = 'person-' + str(per_id) + '_(' + timestamp +').jpg'
     path = str(Path(save_path) / Path(save_file))
     
     if crop:
@@ -255,9 +265,7 @@ def detect(save_img=False):
     curr_vidcap = None # for different video file
     for path, img, im0s, vid_cap in dataset:
         # if frame_curr_vid == 0:
-        if webcam:
-            fps = 25
-        else:
+        if not webcam:
             fps = vid_cap.get(cv2.CAP_PROP_FPS)
 
         if (curr_vidcap!=vid_cap):
@@ -477,7 +485,11 @@ def detect(save_img=False):
                         obj_name = names[int(obj[5])]
                         obj_trk_id = obj[4]
                         obj_bbox = obj[:4]
-                        save_screenshot(img_ori, ss_path, obj_name, obj_trk_id, trk_id, obj_bbox, per_bbox, crop, first_detect, curr_frame, fps)
+                        if webcam:
+                            timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%I.%M.%S%p")
+                        else:
+                            timestamp = timestamp_offline(curr_frame, fps)
+                        save_screenshot(img_ori, ss_path, obj_name, obj_trk_id, trk_id, obj_bbox, per_bbox, crop, first_detect, timestamp)
                         # x1, y1, x2, y2 = obj[:4]
                         # im_obj = img_ori[y1:y2, x1:x2]
                         # create_screenshot(im_obj, im_person, ss_path, obj_name, obj_trk_id, trk_id)
@@ -495,12 +507,6 @@ def detect(save_img=False):
             pairing_total_time += (t6 - t5)
 
             # Stream results
-            if view_img:
-                cv2.imshow(str(p), im0)
-                # cv2.waitKey(10)  # 1 millisecond
-                if cv2.waitKey(1) == ord('q'):  # q to quit
-                    raise StopIteration
-
             # Save results (image with detections)
             if save_img:
                 if dataset.mode == 'images':
@@ -511,12 +517,25 @@ def detect(save_img=False):
                         if isinstance(vid_writer, cv2.VideoWriter):
                             vid_writer.release()  # release previous video writer
 
-                        fourcc = 'mp4v'  # output video codec
-                        fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                        w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
+                        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # output video codec
+                        if webcam:
+                            fps = opt.stream_fps
+                            w, h = opt.stream_size
+                        else:
+                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        vid_writer = cv2.VideoWriter(save_path, fourcc, fps, (w, h))
                     vid_writer.write(im0)
+
+            if view_img:
+                cv2.imshow(str(p), im0)
+                # cv2.waitKey(10)  # 1 millisecond
+                if cv2.waitKey(1) == ord('q'):  # q to quit
+                    raise StopIteration
+
+    if view_img:
+        cv2.destroyAllWindows()
 
     if save_img:
         vid_writer.release()
@@ -553,6 +572,8 @@ if __name__ == '__main__':
     parser.add_argument('--last-detect', action='store_true', help='save screenshot of object at first detect else last detect, default first')
     parser.add_argument('--deepsort', action='store_true', help='use deepsort or sort, default sort')
     parser.add_argument('--labels', type=str, default='yolov5/data/dataset.names', help='labels for onnx or openvino model')
+    parser.add_argument('--stream-size', type=int, default=[640,480], help='image (height, width) for save stream data')
+    parser.add_argument('--stream-fps', type=int, default=25, help='fps for save stream data')
     opt = parser.parse_args()
     print(opt)
 
