@@ -108,7 +108,7 @@ def save_screenshot(im0, save_path, obj_name, obj_id, per_id, obj_bbox, per_bbox
         plot_bbox_on_img(c1, c2, img, label=label_name, color=[0, 204, 204], line_thickness=2)
 
     cv2.imwrite(path, img)
-    cv2.destroyAllWindows()
+    # cv2.destroyAllWindows()
 
 def save_inventory(im0, save_path, obj_name, obj_id, obj_bbox, first_detect):
     if not os.path.exists(save_path):
@@ -125,7 +125,7 @@ def save_inventory(im0, save_path, obj_name, obj_id, obj_bbox, first_detect):
     c1, c2 = (int(obj_bbox[0]), int(obj_bbox[1])), (int(obj_bbox[2]), int(obj_bbox[3]))
     plot_bbox_on_img(c1, c2, img, label=label_name, color=[0, 100, 0], line_thickness=2)
     cv2.imwrite(path, img)
-    cv2.destroyAllWindows()
+    # cv2.destroyAllWindows()
 
 
 def detect(save_img=False):
@@ -226,6 +226,7 @@ def detect(save_img=False):
         view_img = check_imshow()
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
+        save_img = True
     
     else:
         save_img = True
@@ -256,6 +257,7 @@ def detect(save_img=False):
     pairing_total_time = 0.
     total_frame = 0
     curr_frame = 0
+    fps = 0
 
     # Run inference
     t0 = time.time()
@@ -361,10 +363,11 @@ def detect(save_img=False):
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
                 p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
+                save_path = str(Path(out) / 'webcam.mp4')
             else:
                 p, s, im0 = path, '', im0s.copy()
+                save_path = str(Path(out) / Path(p).name)
             img_ori = im0.copy()
-            save_path = str(Path(out) / Path(p).name)
             txt_path = str(Path(out) / Path(p).stem) + ('_%g' % dataset.frame if dataset.mode == 'video' else '')
 
             s += '%gx%g ' % img.shape[2:]  # print string
@@ -432,10 +435,8 @@ def detect(save_img=False):
             tracking_total_time += (t4 - t3)
             # print('tracking time %.3fs' % (t4 - t3))
             
-
             print('%sDone. (%.3fs)' % (s, t2 - t1))
             
-
             t5 = time_synchronized()
 
             # # pairing
@@ -449,7 +450,7 @@ def detect(save_img=False):
             # check warning on pairing result and plot result
             for obj in obj_list:
                 c1, c2 = (int(obj[0]), int(obj[1])), (int(obj[2]), int(obj[3])) 
-                trk_id = str(obj[4])
+                trk_id = str(int(obj[4]))
                 cls_id = int(obj[5])
                 obj_bbox = obj[:4]
                 save_inventory(img_ori, inven_path, names[cls_id], trk_id, obj_bbox, first_detect)
@@ -458,6 +459,7 @@ def detect(save_img=False):
                 # print(obj_status)
                 if len(obj_status)==0:
                     print('something wrong, the object has not been assign to pair')
+                    continue
 
                 obj_status = obj_status[0]
                 img_label = '%s %s' % (names[cls_id], trk_id)
@@ -470,7 +472,7 @@ def detect(save_img=False):
             
             for per in person_list:
                 c1, c2 = (int(per[0]), int(per[1])), (int(per[2]), int(per[3])) 
-                trk_id = str(per[4])
+                trk_id = str(int(per[4]))
                 cls_id = int(per[5])
                 per_bbox = per[:4]
                 obj_status = [p for p in pair.pair_list if str(p.other_track_id)==trk_id]
@@ -519,8 +521,11 @@ def detect(save_img=False):
 
                         fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # output video codec
                         if webcam:
-                            fps = opt.stream_fps
+                            if fps == 0:
+                                fps = int((1/(t2-t1+t4-t3+t6-t5))) + 1
+                            # fps = opt.stream_fps
                             w, h = opt.stream_size
+
                         else:
                             fps = vid_cap.get(cv2.CAP_PROP_FPS)
                             w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -573,7 +578,7 @@ if __name__ == '__main__':
     parser.add_argument('--deepsort', action='store_true', help='use deepsort or sort, default sort')
     parser.add_argument('--labels', type=str, default='yolov5/data/dataset.names', help='labels for onnx or openvino model')
     parser.add_argument('--stream-size', type=int, default=[640,480], help='image (height, width) for save stream data')
-    parser.add_argument('--stream-fps', type=int, default=25, help='fps for save stream data')
+    parser.add_argument('--stream-fps', type=int, default=8, help='fps for save stream data')
     opt = parser.parse_args()
     print(opt)
 

@@ -37,7 +37,7 @@ class Pairing:
         person = []
         for x in object_list:
             
-            if names[int(x[5])]=='person':
+            if names[int(x[5])]=='person' or names[int(x[5])]=='Person':
                 person.append(x)
             else:
                 obj.append(x)
