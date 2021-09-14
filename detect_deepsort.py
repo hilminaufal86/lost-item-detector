@@ -108,7 +108,7 @@ def save_screenshot(im0, save_path, obj_name, obj_id, per_id, obj_bbox, per_bbox
         plot_bbox_on_img(c1, c2, img, label=label_name, color=[0, 204, 204], line_thickness=2)
 
     cv2.imwrite(path, img)
-    # cv2.destroyAllWindows()
+    cv2.destroyAllWindows()
 
 def save_inventory(im0, save_path, obj_name, obj_id, obj_bbox, first_detect):
     if not os.path.exists(save_path):
@@ -446,7 +446,6 @@ def detect(save_img=False):
             # assign object and person to be plot in im0
             obj_list = pair.obj
             person_list = pair.person
-            
             # check warning on pairing result and plot result
             for obj in obj_list:
                 c1, c2 = (int(obj[0]), int(obj[1])), (int(obj[2]), int(obj[3])) 
@@ -455,8 +454,8 @@ def detect(save_img=False):
                 obj_bbox = obj[:4]
                 save_inventory(img_ori, inven_path, names[cls_id], trk_id, obj_bbox, first_detect)
 
-                obj_status = [p for p in pair.pair_list if str(p.obj_track_id)==trk_id and int(p.obj_class_id)==cls_id]
-                # print(obj_status)
+                obj_status = [p for p in pair.pair_list if str(int(p.obj_track_id))==str(trk_id) and int(p.obj_class_id)==cls_id]
+                
                 if len(obj_status)==0:
                     print('something wrong, the object has not been assign to pair')
                     continue
@@ -521,9 +520,12 @@ def detect(save_img=False):
 
                         fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # output video codec
                         if webcam:
-                            if fps == 0:
-                                fps = int((1/(t2-t1+t4-t3+t6-t5))) + 1
-                            # fps = opt.stream_fps
+                            # if fps == 0:
+                                # fps = int((1/(t2-t1+t4-t3+t6-t5))) + 1
+                                # fps = opt.sfps
+                            # if int((1/(t2-t1+t4-t3+t6-t5))) > fps:
+                            #     fps = int((1/(t2-t1+t4-t3+t6-t5)))
+                            fps = opt.stream_fps
                             w, h = opt.stream_size
 
                         else:
@@ -578,7 +580,7 @@ if __name__ == '__main__':
     parser.add_argument('--deepsort', action='store_true', help='use deepsort or sort, default sort')
     parser.add_argument('--labels', type=str, default='yolov5/data/dataset.names', help='labels for onnx or openvino model')
     parser.add_argument('--stream-size', type=int, default=[640,480], help='image (height, width) for save stream data')
-    parser.add_argument('--stream-fps', type=int, default=8, help='fps for save stream data')
+    parser.add_argument('--stream-fps', type=int, default=9, help='fps for save stream data')
     opt = parser.parse_args()
     print(opt)
 
