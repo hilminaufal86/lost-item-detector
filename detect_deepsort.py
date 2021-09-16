@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import fnmatch
 import datetime
+import psutil
 
 import cv2
 import torch
@@ -131,7 +132,7 @@ def save_inventory(im0, save_path, obj_name, obj_id, obj_bbox, first_detect):
 def detect(save_img=False):
     out, source, weights, view_img, save_txt, imgsz= \
         opt.save_dir, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
-    
+    process = psutil.Process(os.getpid())
     if not opt.scaledyolov4:
         sys.path.insert(0, './yolov5')
         from yolov5.models.experimental import attempt_load
@@ -259,6 +260,7 @@ def detect(save_img=False):
     curr_frame = 0
     fps = 0
 
+    
     # Run inference
     t0 = time.time()
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
@@ -555,6 +557,7 @@ def detect(save_img=False):
     print('Pairing Total Time (%.3fs)' % (pairing_total_time))
     print('Pairing Average Time (%.3fs)' % (pairing_total_time/total_frame))
     print('Done. (%.3fs)' % (time.time() - t0))
+    print('Memory usage (.%3fMB)' % (process.memory_info().rss / 1024 ** 2))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

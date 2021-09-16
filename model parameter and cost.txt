@@ -1,0 +1,19 @@
+			| GMACs		| GFLOPS	| Params	|
+pytorch:				| 2xGMACs
+yolov5s			| 8.412		| 		| 7.249 M	|
+yolov5m			| 25.695	|		| 21.473 M	| 520.605
+yolov5l			| 57.987	|		| 47.370 M	|
+scaledyolov4p5		|		|		|		|
+scaledyolov4p6		|		|		|		|
+scaledyolov4p7		|		|		|		|
+yolov4csp		|		|		|		|
+
+onnx:
+yolov5s			| 	| 		| 	|
+yolov5m			| 	|		| 	| 
+yolov5l			| 	|		| 	|
+
+openvino:
+yolov5s			| 	| 		| 	|
+yolov5m			| 	|		| 	| 
+yolov5l			| 	|		| 	|
