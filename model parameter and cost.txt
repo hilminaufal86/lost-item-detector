@@ -1,15 +1,15 @@
 			| GMACs		| GFLOPS	| Params	| process load	| repo GFLOPs
 pytorch:				| 2xGMACs
-yolov5s			| 8.412		| 16.824	| 7.249 M	|		| 17.0
-yolov5m			| 25.695	| 51.39		| 21.473 M	| 520.605 MB	| 51.3
-yolov5l			| 57.987	| 115.974	| 47.370 M	|		| 114.4
-scaledyolov4p5		|		|		|		|		| 
-scaledyolov4p6		|		|		|		|		| 
-scaledyolov4p7		|		|		|		|		| 
-yolov4csp		|		|		|		|		| 
+yolov5s			| 8.412		| 16.824	| 7.249 M	| 300.301 MB	| 17.0
+yolov5m			| 25.695	| 51.39		| 21.473 M	| 408.613 MB	| 51.3
+yolov5l			| 57.987	| 115.974	| 47.370 M	| 609.828 MB	| 114.4
+scaledyolov4p5		| 82.658	| 165.316	| 70.234 M	| 769.078 MB	| 165.2
+scaledyolov4p6		| 88.931	| 177.862	| 126.651 M	| 1209.547 MB	| 177.7
+scaledyolov4p7		| 141.195	| 282.38	| 285.976 M	| 2416.223 MB	| 
+yolov4csp		| 59.695	| 119.38	| 52.501 M	| 597.621 MB	| 
 
 onnx:
-yolov5s			| 	| 		| 	|
+yolov5s			| 	| 		| 	| 
 yolov5m			| 	|		| 	| 
 yolov5l			| 	|		| 	|
 
@@ -19,4 +19,4 @@ yolov5m			| 	|		| 	|
 yolov5l			| 	|		| 	|
 
 deepsort:
-appearance extractor	| 56.262	| 102.524	| 11.169 M	| 
+appearance extractor	| 56.262	| 102.524	| 11.169 M	| 234.645 MB	|
