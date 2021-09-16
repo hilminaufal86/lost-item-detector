@@ -6,6 +6,8 @@ from .sort.nn_matching import NearestNeighborDistanceMetric
 from .sort.detection import Detection
 from .sort.tracker import Tracker
 
+import os
+import psutil
 
 __all__ = ['DeepSort']
 
@@ -14,15 +16,16 @@ class DeepSort(object):
     def __init__(self, model_path, max_dist=0.2, min_confidence=0.3, nms_max_overlap=1.0, max_iou_distance=0.7, max_age=70, n_init=3, nn_budget=100, use_cuda=True):
         self.min_confidence = min_confidence
         self.nms_max_overlap = nms_max_overlap
-
+        process = psutil.Process(os.getpid())
         self.extractor = Extractor(model_path, use_cuda=use_cuda)
-
+        print('Memory usage of deepsort model load (.%3fMB)' % (process.memory_info().rss / 1024 ** 2))
         max_cosine_distance = max_dist
         metric = NearestNeighborDistanceMetric(
             "cosine", max_cosine_distance, nn_budget)
         self.tracker = Tracker(
             metric, max_iou_distance=max_iou_distance, max_age=max_age, n_init=n_init)
 
+    # @profile
     def update(self, bbox_xywh, confidences, ori_img, cls_id):
         self.height, self.width = ori_img.shape[:2]
         # generate detections
