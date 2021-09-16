@@ -19,4 +19,4 @@ yolov5m			| 	|		| 	|
 yolov5l			| 	|		| 	|
 
 deepsort:
-appearance extractor	| 56.262	| 102.524	| 11.169 M	|
+appearance extractor	| 56.262	| 102.524	| 11.169 M	| 
