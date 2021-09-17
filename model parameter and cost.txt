@@ -1,22 +1,41 @@
+Computational Cost
 			| GMACs		| GFLOPS	| Params	| process load	| repo GFLOPs
 pytorch:				| 2xGMACs
-yolov5s			| 8.412		| 16.824	| 7.249 M	| 300.301 MB	| 17.0
-yolov5m			| 25.695	| 51.39		| 21.473 M	| 408.613 MB	| 51.3
-yolov5l			| 57.987	| 115.974	| 47.370 M	| 609.828 MB	| 114.4
+yolov5s			| 8.412		| 16.824	| 7.249 M	| 300.301 MB	| 17.0		| 69.508 MB
+yolov5m			| 25.695	| 51.39		| 21.473 M	| 408.613 MB	| 51.3		| 179.043 MB
+yolov5l			| 57.987	| 115.974	| 47.370 M	| 609.828 MB	| 114.4		| 374.758 MB
 scaledyolov4p5		| 82.658	| 165.316	| 70.234 M	| 769.078 MB	| 165.2
 scaledyolov4p6		| 88.931	| 177.862	| 126.651 M	| 1209.547 MB	| 177.7
 scaledyolov4p7		| 141.195	| 282.38	| 285.976 M	| 2416.223 MB	| 
 yolov4csp		| 59.695	| 119.38	| 52.501 M	| 597.621 MB	| 
 
-onnx:
-yolov5s			| 	| 		| 	| 
-yolov5m			| 	|		| 	| 
-yolov5l			| 	|		| 	|
+onnx:				  estimate
+yolov5s			| 	| *16.87	| 7.249 M	| 74.395 MB		| 39.398 MB		
+yolov5m			| 	| *51.48	| 21.473 M	| 131.926 MB		| 96.727 MB
+yolov5l			| 	| *116.124	| 47.37 M	| 236.52 MB		| 201.176 MB
 
 openvino:
-yolov5s			| 	| 		| 	|
-yolov5m			| 	|		| 	| 
-yolov5l			| 	|		| 	|
+yolov5s			| 	| 16.87		| 7.249 M	| 158.561 MB
+yolov5m			| 	| 51.48		| 21.473 M	| 296.033 MB
+yolov5l			| 	| 116.124	| 47.37 M	| 475.694 MB
 
 deepsort:
-appearance extractor	| 56.262	| 102.524	| 11.169 M	| 234.645 MB	|
+appearance extractor	| 56.262	| 102.524	| 11.169 M	| 184.523 MB	| 89.992 MB
+
+
+Big O notation
+Sort:
+asosiasi = create matrix + linear sum assignment
+space = n2 => O(n2)
+time = n2 + n2 => O(n2)
+tracking = match + unmatch_det + unmatch_trk
+space = n + n + n => O(n)
+time = 3n => O(n)
+
+pairing = update + pair
+space = c + n + 2.n/2 + n => O(n)
+time = n + n + n + n.(n + n) = O(n2)
+
+labeling dan save screenshot = iterate object and person
+space = c + m + c => O(m) m=pair_list
+time = n/2.(c + n) + n/2.(c + n + m.(n + c)) + c => O(n2m) => n=(obj_list + person_list), m=pair_list 
