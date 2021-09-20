@@ -19,7 +19,7 @@ class Pairing:
 
         self.obj = obj
         self.person = person
-        print(self.obj)
+        # print(self.obj)
         for o in self.obj:
             if len(self.pair_list)==0:
                 self.pair_list.append(Pair_unit(o[5], o[4], -1))

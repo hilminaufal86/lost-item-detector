@@ -26,8 +26,8 @@ appearance extractor	| 56.262	| 102.524	| 11.169 M	| 184.523 MB	| 89.992 MB
 Big O notation
 Sort:
 asosiasi = create matrix + linear sum assignment
-space = n2 => O(n2)
-time = n2 + n2 => O(n2)
+space = n2 => O(nm)
+time = n2 + n2 => O(nm)
 tracking = match + unmatch_det + unmatch_trk
 space = n + n + n => O(n)
 time = 3n => O(n)

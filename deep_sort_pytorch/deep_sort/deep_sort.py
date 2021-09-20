@@ -16,9 +16,9 @@ class DeepSort(object):
     def __init__(self, model_path, max_dist=0.2, min_confidence=0.3, nms_max_overlap=1.0, max_iou_distance=0.7, max_age=70, n_init=3, nn_budget=100, use_cuda=True):
         self.min_confidence = min_confidence
         self.nms_max_overlap = nms_max_overlap
-        process = psutil.Process(os.getpid())
+        # process = psutil.Process(os.getpid())
         self.extractor = Extractor(model_path, use_cuda=use_cuda)
-        print('Memory usage of deepsort model load (.%3fMB)' % (process.memory_info().rss / 1024 ** 2))
+        # print('Memory usage of deepsort model load (%.3fMB)' % (process.memory_info().rss / 1024 ** 2))
         max_cosine_distance = max_dist
         metric = NearestNeighborDistanceMetric(
             "cosine", max_cosine_distance, nn_budget)

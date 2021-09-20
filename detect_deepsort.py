@@ -557,7 +557,7 @@ def detect(save_img=False):
     print('Pairing Total Time (%.3fs)' % (pairing_total_time))
     print('Pairing Average Time (%.3fs)' % (pairing_total_time/total_frame))
     print('Done. (%.3fs)' % (time.time() - t0))
-    print('Memory usage (.%3fMB)' % (process.memory_info().rss / 1024 ** 2))
+    print('Memory usage (%.3fMB)' % (process.memory_info().rss / 1024 ** 2))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
